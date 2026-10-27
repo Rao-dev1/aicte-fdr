@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class InstitutionCreate(BaseModel):
@@ -45,6 +45,19 @@ class DepositOut(BaseModel):
     maturity_date: date
     status: str
     previous_deposit_id: Optional[int]
+    confirmed_reference_no: Optional[str] = None
+    confirmed_bank_name: Optional[str] = None
+    confirmed_amount: Optional[Decimal] = None
+    confirmed_issue_date: Optional[date] = None
+    confirmed_maturity_date: Optional[date] = None
+    mismatch_fields: list[str] = []
+
+    @field_validator("mismatch_fields", mode="before")
+    @classmethod
+    def split_mismatches(cls, value):
+        if isinstance(value, str):
+            return [item for item in value.split(",") if item]
+        return value
 
 
 class DepositPage(BaseModel):
@@ -55,9 +68,17 @@ class DepositPage(BaseModel):
 
 
 class VerifyIn(BaseModel):
-    # Amount independently confirmed by the bank or the officer. None means "no discrepancy check, accept as submitted".
+    # Bank-confirmed values. Leave a field out (null) if it was not checked.
+    confirmed_reference_no: Optional[str] = None
+    confirmed_bank_name: Optional[str] = None
     confirmed_amount: Optional[Decimal] = None
+    confirmed_issue_date: Optional[date] = None
+    confirmed_maturity_date: Optional[date] = None
     observations: str = ""
+
+
+class RenewIn(DepositCreate):
+    pass
 
 
 class ReleaseOut(BaseModel):
@@ -85,3 +106,36 @@ class AuditOut(BaseModel):
     actor: str
     detail: str
     at: datetime
+
+
+class DocumentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    deposit_id: int
+    filename: str
+    content_type: str
+    size_bytes: int
+    uploaded_by: str
+    uploaded_at: datetime
+
+
+class NotificationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    deposit_id: int
+    kind: str
+    role: str
+    message: str
+    is_read: bool
+    created_at: datetime
+
+
+class CalendarEvent(BaseModel):
+    on_date: date
+    type: str
+    deposit_id: int
+    reference_no: str
+    status: str
+    renewal_due: bool

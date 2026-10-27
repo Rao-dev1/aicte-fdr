@@ -1,6 +1,8 @@
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from .api import router
 from .db import engine
@@ -14,7 +16,11 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="AICTE Security Deposit / FDR Portal API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="AICTE Security Deposit / FDR Portal API", version="0.2.0", lifespan=lifespan)
+
+origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if o.strip()]
+app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["*"], allow_headers=["*"])
+
 app.include_router(router, prefix="/api")
 
 

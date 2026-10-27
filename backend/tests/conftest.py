@@ -1,7 +1,8 @@
 import os
 
-# Tests always use a local SQLite file, never Neon. Must be set before the app is imported.
+# Tests always use local SQLite and a test upload folder. Set before the app is imported.
 os.environ["DATABASE_URL"] = "sqlite:///./test_fdr.db"
+os.environ["UPLOAD_DIR"] = "./test_uploads"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

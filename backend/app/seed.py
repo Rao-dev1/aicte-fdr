@@ -16,11 +16,13 @@ DEMO_USERS = [
 
 
 def seed_demo_users(db: Session) -> int:
-    if db.scalar(select(User.id).limit(1)) is not None:
-        return 0
-
     created = 0
     for username, full_name, role, code, password in DEMO_USERS:
+        uname = username.strip().lower()
+        existing = db.scalar(select(User).where(User.username == uname))
+        if existing is not None:
+            continue
+
         institution_id = None
         if code:
             inst = db.scalar(select(Institution).where(Institution.code == code))
@@ -29,11 +31,12 @@ def seed_demo_users(db: Session) -> int:
                 db.add(inst)
                 db.flush()
             institution_id = inst.id
+
         db.add(
             User(
-                username=username,
+                username=uname,
                 full_name=full_name,
-                email=f"{username}@example.com",
+                email=f"{uname}@example.com",
                 role=role,
                 institution_id=institution_id,
                 password_hash=hash_password(password),

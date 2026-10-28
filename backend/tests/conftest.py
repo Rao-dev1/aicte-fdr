@@ -25,3 +25,33 @@ def client():
         seed_demo_users(db)
     with TestClient(app) as c:
         yield c
+
+
+@pytest.fixture
+def db():
+    with SessionLocal() as session:
+        yield session
+
+
+@pytest.fixture
+def auth_headers():
+    from tests.helpers import hdr
+    return hdr("INSTITUTION_USER", user="institution1", inst=1)
+
+
+@pytest.fixture
+def officer_headers():
+    from tests.helpers import hdr
+    return hdr("REGULATOR_OFFICER", user="officer1")
+
+
+@pytest.fixture
+def admin_headers():
+    from tests.helpers import hdr
+    return hdr("ADMIN", user="admin")
+
+
+@pytest.fixture
+def approver_headers():
+    from tests.helpers import hdr
+    return hdr("APPROVING_AUTHORITY", user="approver1")

@@ -137,3 +137,122 @@ class JobRun(Base):
     detail: Mapped[str] = mapped_column(Text, default="")
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class FDRLineageRelation(Base):
+    __tablename__ = "fdr_lineage_relations"
+    __table_args__ = (
+        UniqueConstraint("source_deposit_id", "target_deposit_id", "relation_type", name="uq_lineage_rel"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_deposit_id: Mapped[int] = mapped_column(ForeignKey("deposits.id"), index=True)
+    target_deposit_id: Mapped[int] = mapped_column(ForeignKey("deposits.id"), index=True)
+    relation_type: Mapped[str] = mapped_column(String(32), index=True)  # ORIGINAL, RENEWAL, AUTO_RENEWAL, REPLACEMENT, SUPERSEDED, RELEASED_CLOSED
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    actor: Mapped[str] = mapped_column(String(100), default="system")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class FDRLifecycleEvent(Base):
+    __tablename__ = "fdr_lifecycle_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    deposit_id: Mapped[int] = mapped_column(ForeignKey("deposits.id"), index=True)
+    event_type: Mapped[str] = mapped_column(String(64), index=True)
+    actor: Mapped[str] = mapped_column(String(100))
+    actor_role: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    summary: Mapped[str] = mapped_column(String(255))
+    details_json: Mapped[str] = mapped_column(Text, default="{}")
+    prev_hash: Mapped[str] = mapped_column(String(64), default="")
+    event_hash: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ReleaseReadinessEvaluation(Base):
+    __tablename__ = "release_readiness_evaluations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    deposit_id: Mapped[int] = mapped_column(ForeignKey("deposits.id"), index=True)
+    release_request_id: Mapped[Optional[int]] = mapped_column(ForeignKey("release_requests.id"), nullable=True)
+    overall_status: Mapped[str] = mapped_column(String(32))  # READY_FOR_APPROVAL, BLOCKED, UNDER_REVIEW, INCOMPLETE
+    total_prerequisites: Mapped[int] = mapped_column(Integer, default=0)
+    satisfied_count: Mapped[int] = mapped_column(Integer, default=0)
+    blocked_count: Mapped[int] = mapped_column(Integer, default=0)
+    pending_count: Mapped[int] = mapped_column(Integer, default=0)
+    graph_data_json: Mapped[str] = mapped_column(Text)
+    evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class RegulationRule(Base):
+    __tablename__ = "regulation_rules"
+    __table_args__ = (
+        UniqueConstraint("rule_code", "version", name="uq_rule_code_version"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    rule_code: Mapped[str] = mapped_column(String(64), index=True)
+    version: Mapped[str] = mapped_column(String(32))
+    title: Mapped[str] = mapped_column(String(255))
+    description: Mapped[str] = mapped_column(Text)
+    effective_from: Mapped[date] = mapped_column(Date)
+    effective_to: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), index=True)  # DRAFT, ACTIVE, SUPERSEDED, ARCHIVED
+    source_reference: Mapped[str] = mapped_column(String(255))
+    rule_spec_json: Mapped[str] = mapped_column(Text)
+    change_summary: Mapped[str] = mapped_column(Text, default="")
+    author: Mapped[str] = mapped_column(String(100))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    published_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AssessmentSnapshot(Base):
+    __tablename__ = "assessment_snapshots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    deposit_id: Mapped[int] = mapped_column(ForeignKey("deposits.id"), index=True)
+    release_request_id: Mapped[Optional[int]] = mapped_column(ForeignKey("release_requests.id"), nullable=True)
+    rule_id: Mapped[int] = mapped_column(ForeignKey("regulation_rules.id"))
+    rule_code: Mapped[str] = mapped_column(String(64))
+    rule_version: Mapped[str] = mapped_column(String(32))
+    assessment_type: Mapped[str] = mapped_column(String(64))  # DEPOSIT_COMPLIANCE, RELEASE_ELIGIBILITY, REPLAY_SIMULATION
+    is_replay: Mapped[bool] = mapped_column(Boolean, default=False)
+    input_snapshot_json: Mapped[str] = mapped_column(Text)
+    evaluation_result: Mapped[str] = mapped_column(String(32))  # COMPLIANT, NON_COMPLIANT, REQUIRES_MANUAL_REVIEW
+    conditions_evaluated_json: Mapped[str] = mapped_column(Text)
+    assessed_by: Mapped[str] = mapped_column(String(100))
+    assessed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class IntegrityFinding(Base):
+    __tablename__ = "integrity_findings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    finding_code: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    category: Mapped[str] = mapped_column(String(64), index=True)
+    severity: Mapped[str] = mapped_column(String(16), index=True)  # CRITICAL, HIGH, MEDIUM, LOW
+    status: Mapped[str] = mapped_column(String(32), index=True)  # OPEN, UNDER_REVIEW, CONFIRMED_INCONSISTENCY, FALSE_POSITIVE, RESOLVED, ESCALATED
+    primary_deposit_id: Mapped[Optional[int]] = mapped_column(ForeignKey("deposits.id"), nullable=True, index=True)
+    related_deposit_ids: Mapped[str] = mapped_column(Text, default="[]")  # JSON list
+    institution_ids: Mapped[str] = mapped_column(Text, default="[]")  # JSON list
+    explanation: Mapped[str] = mapped_column(Text)
+    trigger_values_json: Mapped[str] = mapped_column(Text, default="{}")
+    evidence_json: Mapped[str] = mapped_column(Text, default="{}")
+    assignee: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    first_detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolved_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    resolution_remarks: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class IntegrityFindingAction(Base):
+    __tablename__ = "integrity_finding_actions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    finding_id: Mapped[int] = mapped_column(ForeignKey("integrity_findings.id"), index=True)
+    action: Mapped[str] = mapped_column(String(32))  # STATUS_CHANGE, ASSIGN, COMMENT, ESCALATE
+    actor: Mapped[str] = mapped_column(String(100))
+    actor_role: Mapped[str] = mapped_column(String(32), default="")
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

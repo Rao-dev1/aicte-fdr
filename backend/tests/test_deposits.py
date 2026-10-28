@@ -402,3 +402,48 @@ def test_lifecycle_status_rules():
     assert lifecycle_status("VERIFIED", maturity, date(2026, 12, 2)) == "MATURED"
     assert lifecycle_status("RENEWED", maturity, date(2026, 12, 2)) == "RENEWED"
     assert lifecycle_status("SUBMITTED", maturity, date(2026, 12, 2)) == "SUBMITTED"
+
+
+def test_amount_with_commas_and_symbols_is_accepted(client):
+    inst = make_institution(client, code="TC-AMT")
+    for amt_input, expected in [
+        ("10,000.00", "10000.00"),
+        ("10,000,00", "10000.00"),
+        ("1,00,000", "100000.00"),
+        ("Rs. 35,00,000.00", "3500000.00"),
+    ]:
+        ref = f"FDR-AMT-{abs(hash(amt_input)) % 100000}"
+        r = client.post(
+            "/api/deposits",
+            json={
+                "institution_id": inst,
+                "reference_no": ref,
+                "bank_name": "State Bank of India",
+                "amount": amt_input,
+                "issue_date": "2024-01-01",
+                "maturity_date": "2029-01-01",
+            },
+            headers=hdr("INSTITUTION_USER", inst=inst),
+        )
+        assert r.status_code == 201, f"Failed for {amt_input}: {r.text}"
+        body = r.json()
+        assert float(body["amount"]) == float(expected)
+
+
+def test_zero_and_negative_amounts_rejected(client):
+    inst = make_institution(client, code="TC-BAD")
+    for bad in ["0", "0.00", "-500", "-10,000"]:
+        r = client.post(
+            "/api/deposits",
+            json={
+                "institution_id": inst,
+                "reference_no": "FDR-FAIL",
+                "bank_name": "State Bank of India",
+                "amount": bad,
+                "issue_date": "2024-01-01",
+                "maturity_date": "2029-01-01",
+            },
+            headers=hdr("INSTITUTION_USER", inst=inst),
+        )
+        assert r.status_code == 422, f"Expected 422 for amount {bad}, got {r.status_code}"
+

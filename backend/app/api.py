@@ -16,9 +16,13 @@ from .db import get_db
 from .lifecycle import REMINDED, STATUSES, TRACKED, mismatched_fields
 from .models import AuditLog, Deposit, Document, EmailLog, Institution, JobRun, Notification, ReleaseRequest, utcnow
 from .scheduler import run_daily_check, today_ist
+from .services import deadline_service, deficiency_service, trace_service
 from .schemas import (
     AuditOut,
     CalendarEvent,
+    DeadlinesResponse,
+    DeficiencyReportGenerateIn,
+    DeficiencyReportPreview,
     DepositCreate,
     DepositOut,
     DepositPage,
@@ -115,6 +119,15 @@ def create_deposit(
     db.add(dep)
     db.flush()
     audit(db, "deposit", dep.id, "CREATED", actor.name, f"ref {dep.reference_no}, amount {dep.amount}")
+    trace_service.record_lifecycle_event(
+        db,
+        dep.id,
+        "CREATED_SUBMITTED",
+        actor.name,
+        f"FDR registered: Ref {dep.reference_no}, Amount ₹{dep.amount:,.2f}",
+        {"bank": dep.bank_name, "issue_date": str(dep.issue_date), "maturity_date": str(dep.maturity_date)},
+        actor.role,
+    )
     db.commit()
     db.refresh(dep)
     return dep
@@ -179,6 +192,15 @@ def verify_deposit(
 
     detail = f"mismatched: {', '.join(mismatches) or 'none'}. {body.observations}".strip()
     audit(db, "deposit", dep.id, "DISCREPANCY_FLAGGED" if mismatches else "VERIFIED", actor.name, detail)
+    trace_service.record_lifecycle_event(
+        db,
+        dep.id,
+        "DISCREPANCY_DETECTED" if mismatches else "VERIFICATION_STATUS_CHANGED",
+        actor.name,
+        f"Verification completed: status is now {dep.status}",
+        {"mismatches": mismatches, "observations": body.observations},
+        actor.role,
+    )
     db.commit()
     db.refresh(dep)
     return dep
@@ -204,6 +226,35 @@ def renew_deposit(
     old.status = "RENEWED"
     audit(db, "deposit", old.id, "RENEWED", actor.name, f"replaced by {new.reference_no}")
     audit(db, "deposit", new.id, "CREATED", actor.name, f"renewal of {old.reference_no}")
+    trace_service.record_lifecycle_event(
+        db,
+        old.id,
+        "SUPERSEDED_BY_RENEWAL",
+        actor.name,
+        f"FDR renewed/replaced by successor FDR #{new.id} ({new.reference_no})",
+        {"new_id": new.id, "new_ref": new.reference_no},
+        actor.role,
+    )
+    trace_service.record_lifecycle_event(
+        db,
+        new.id,
+        "RENEWAL_RECORDED",
+        actor.name,
+        f"FDR created as renewal of predecessor FDR #{old.id} ({old.reference_no})",
+        {"old_id": old.id, "old_ref": old.reference_no},
+        actor.role,
+    )
+    try:
+        trace_service.add_lineage_relation(
+            db,
+            old.id,
+            new.id,
+            "RENEWAL",
+            actor.name,
+            {"renewal_amount": float(new.amount)},
+        )
+    except Exception:
+        pass
     db.commit()
     db.refresh(new)
     return new
@@ -257,6 +308,15 @@ def upload_document(
     db.add(doc)
     db.flush()
     audit(db, "deposit", dep.id, "DOCUMENT_UPLOADED", actor.name, doc.filename)
+    trace_service.record_lifecycle_event(
+        db,
+        dep.id,
+        "DOCUMENT_UPLOADED",
+        actor.name,
+        f"Document uploaded: {doc.filename}",
+        {"document_id": doc.id, "size_bytes": doc.size_bytes, "content_type": doc.content_type},
+        actor.role,
+    )
     db.commit()
     db.refresh(doc)
     return doc
@@ -308,6 +368,15 @@ def request_release(
     dep.status = "RELEASE_REQUESTED"
     db.flush()
     audit(db, "deposit", dep.id, "RELEASE_REQUESTED", actor.name, f"request {rr.id}")
+    trace_service.record_lifecycle_event(
+        db,
+        dep.id,
+        "RELEASE_REQUESTED",
+        actor.name,
+        f"Release request #{rr.id} submitted by {actor.name}",
+        {"release_request_id": rr.id},
+        actor.role,
+    )
     db.commit()
     db.refresh(rr)
     return rr
@@ -355,6 +424,15 @@ def decide_release(
     rr.decided_by = actor.name
     rr.remarks = body.remarks
     audit(db, "deposit", dep.id, action, actor.name, body.remarks)
+    trace_service.record_lifecycle_event(
+        db,
+        dep.id,
+        "RELEASE_APPROVED" if body.approve else "RELEASE_REJECTED",
+        actor.name,
+        f"Release decision: {'Approved' if body.approve else 'Rejected'}. Remarks: {body.remarks}",
+        {"approve": body.approve, "remarks": body.remarks},
+        actor.role,
+    )
     db.commit()
     db.refresh(rr)
     return rr
@@ -480,6 +558,58 @@ def dashboard_summary(db: Session = Depends(get_db), actor: Actor = Depends(get_
         "upcoming": upcoming[:10],
         "pending_approvals": pending_approvals,
     }
+
+
+# ============================================================================
+# FEATURE 1: Smart Deadline & Expiry Alerts Endpoint
+# ============================================================================
+
+@router.get("/deadlines", response_model=DeadlinesResponse)
+def get_deadlines(
+    filter_type: str = Query("all", alias="filter", pattern="^(all|expiring|overdue|pending_actions)$"),
+    threshold: str = Query("all", pattern="^(all|30|15|7|overdue)$"),
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_actor),
+):
+    """Retrieve dynamically calculated deadline alerts for FDR maturity, scrutiny, renewals, and approvals."""
+    return deadline_service.get_deadlines(db, actor, filter_type=filter_type, threshold=threshold, limit=limit)
+
+
+# ============================================================================
+# FEATURE 3: Deficiency Report Generator Endpoints
+# ============================================================================
+
+@router.get("/deposits/{deposit_id}/deficiency-report/preview", response_model=DeficiencyReportPreview)
+def get_deficiency_preview(
+    deposit_id: int,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_actor),
+):
+    """Compile and preview real deficiencies, discrepancies, and missing documents for an FDR record."""
+    dep = get_deposit_or_404(db, deposit_id, actor)
+    return deficiency_service.assess_deposit_deficiencies(db, dep, actor)
+
+
+@router.post("/deposits/{deposit_id}/deficiency-report")
+def generate_deficiency_report(
+    deposit_id: int,
+    body: Optional[DeficiencyReportGenerateIn] = None,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_actor),
+):
+    """Generate and stream an official, government-grade PDF deficiency report."""
+    dep = get_deposit_or_404(db, deposit_id, actor)
+    try:
+        pdf_bytes = deficiency_service.generate_deficiency_pdf(db, dep, actor, body)
+        clean_ref = dep.reference_no.replace("/", "_").replace("\\", "_")
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="AICTE_Deficiency_Report_{clean_ref}.pdf"'},
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get("/reports/deposits")

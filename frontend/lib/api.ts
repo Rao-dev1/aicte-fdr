@@ -1,7 +1,7 @@
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 export type Role = "INSTITUTION_USER" | "REGULATOR_OFFICER" | "APPROVING_AUTHORITY" | "ADMIN";
-export type Session = { role: Role; user: string };
+export type Session = { token: string; role: Role; user: string };
 
 export const ROLE_LABELS: Record<Role, string> = {
   INSTITUTION_USER: "Institution",
@@ -10,7 +10,7 @@ export const ROLE_LABELS: Record<Role, string> = {
   ADMIN: "Admin",
 };
 
-// ---- Session (placeholder login: role stored in this browser only) ----------
+// ---- Session: login token kept in this browser's local storage ---------------
 
 const SESSION_KEY = "fdr-session";
 
@@ -164,10 +164,7 @@ export class ApiError extends Error {
 function authHeaders(extra?: HeadersInit): Headers {
   const headers = new Headers(extra);
   const session = getSession();
-  if (session) {
-    headers.set("X-Role", session.role);
-    headers.set("X-User", session.user);
-  }
+  if (session) headers.set("Authorization", `Bearer ${session.token}`);
   return headers;
 }
 
@@ -181,8 +178,27 @@ async function check(res: Response): Promise<Response> {
   } catch {
     /* body was not JSON */
   }
+  // Expired or invalid token: send the user back to the login page.
+  if (res.status === 401 && !window.location.pathname.startsWith("/login")) {
+    clearSession();
+    window.location.href = "/login";
+  }
   throw new ApiError(res.status, message);
 }
+
+export type Extracted = {
+  engine: string;
+  fields: Record<string, string | null>;
+  warnings: string[];
+};
+
+export type LoginResult = {
+  access_token: string;
+  username: string;
+  name: string;
+  role: Role;
+  institution_id: number | null;
+};
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API_URL}/api${path}`, { ...init, headers: authHeaders(init.headers) });

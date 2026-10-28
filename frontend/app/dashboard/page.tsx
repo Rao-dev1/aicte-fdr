@@ -3,9 +3,13 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { Notice, PageTitle, Shell, StatusBadge } from "@/components/Shell";
-// StatusBadge is used by nothing here now; keep the import list honest.
+import { Notice, PageTitle, Shell } from "@/components/Shell";
 import { api, Dashboard, dateOnly, getSession, money } from "@/lib/api";
+
+type JobInfo = {
+  schedule: string;
+  runs: { id: number; trigger: string; status: string; started_at: string }[];
+};
 
 const CARDS: { key: string; label: string; statuses: string[] }[] = [
   { key: "active", label: "Active", statuses: ["ACTIVE", "VERIFIED"] },
@@ -20,6 +24,7 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [jobs, setJobs] = useState<JobInfo | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -27,6 +32,11 @@ export default function DashboardPage() {
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load dashboard");
+    }
+    if (getSession()?.role === "ADMIN") {
+      api<JobInfo>("/admin/jobs?limit=5")
+        .then(setJobs)
+        .catch(() => setJobs(null));
     }
   }, []);
 
@@ -37,10 +47,15 @@ export default function DashboardPage() {
 
   async function runSweep() {
     try {
-      const result = await api<{ changed: number; notifications_created: number }>("/admin/lifecycle-sweep", {
-        method: "POST",
-      });
-      setMessage(`Daily check done: ${result.changed} status changes, ${result.notifications_created} new reminders.`);
+      const result = await api<{ status: string; changed?: number; notifications_created?: number; error?: string }>(
+        "/admin/lifecycle-sweep",
+        { method: "POST" },
+      );
+      if (result.status === "OK") {
+        setMessage(`Daily check done: ${result.changed} status changes, ${result.notifications_created} new reminders.`);
+      } else {
+        setError(`Daily check failed: ${result.error ?? "unknown error"}`);
+      }
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Daily check failed");
@@ -63,9 +78,33 @@ export default function DashboardPage() {
       {message && <Notice kind="ok">{message}</Notice>}
 
       {isAdmin && (
-        <button onClick={runSweep} className="mb-6 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm hover:bg-slate-50">
-          Run daily maturity check
-        </button>
+        <section className="mb-6 rounded-xl border border-slate-300 bg-white p-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="font-semibold">Daily maturity check</h2>
+              <p className="text-sm text-slate-600">
+                Runs automatically at {jobs?.schedule ?? "08:00 Indian time"}. Missed runs are caught up when the server starts.
+              </p>
+            </div>
+            <button onClick={runSweep} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm hover:bg-slate-50">
+              Run now
+            </button>
+          </div>
+          {jobs && jobs.runs.length > 0 && (
+            <ul className="mt-4 divide-y divide-slate-100 text-sm">
+              {jobs.runs.map((r) => (
+                <li key={r.id} className="flex flex-wrap justify-between gap-2 py-2">
+                  <span>
+                    {new Date(r.started_at).toLocaleString("en-IN")} · {r.trigger}
+                  </span>
+                  <span className={r.status === "OK" ? "text-emerald-700" : r.status === "FAILED" ? "text-red-700" : "text-slate-600"}>
+                    {r.status}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
       )}
 
       {data && (

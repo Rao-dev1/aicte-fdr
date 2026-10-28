@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { DragEvent, FormEvent, useEffect, useRef, useState } from "react";
 import { Notice, PageTitle, Shell } from "@/components/Shell";
-import { api, apiUpload, Institution } from "@/lib/api";
+import { api, apiUpload, Extracted, Institution } from "@/lib/api";
 
 const MAX_BYTES = 10 * 1024 * 1024;
 const ACCEPTED = ["application/pdf", "image/png", "image/jpeg"];
@@ -77,6 +77,8 @@ export default function NewDepositPage() {
   const [dragging, setDragging] = useState(false);
   const [saving, setSaving] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
+  const [reading, setReading] = useState(false);
+  const [readNotes, setReadNotes] = useState<string[]>([]);
 
   useEffect(() => {
     api<Institution[]>("/institutions")
@@ -88,13 +90,38 @@ export default function NewDepositPage() {
     setForm((f) => ({ ...f, [name]: value }));
   }
 
-  function pickFile(candidate: File | undefined) {
+  async function pickFile(candidate: File | undefined) {
     if (!candidate) return;
     setFile(candidate);
     setErrors((e) => {
       const { file: _, ...rest } = e;
       return rest;
     });
+    if (!ACCEPTED.includes(candidate.type)) return;
+
+    // Suggest values from the document. Only empty fields are filled, and the user checks every value.
+    setReading(true);
+    setReadNotes([]);
+    try {
+      const result = await apiUpload<Extracted>("/extract/fdr", candidate);
+      setForm((f) => ({
+        ...f,
+        reference_no: f.reference_no || result.fields.reference_no || "",
+        bank_name: f.bank_name || result.fields.bank_name || "",
+        amount: f.amount || result.fields.amount || "",
+        issue_date: f.issue_date || result.fields.issue_date || "",
+        maturity_date: f.maturity_date || result.fields.maturity_date || "",
+      }));
+      const notes = [...result.warnings];
+      if (result.engine !== "none" && Object.values(result.fields).some(Boolean)) {
+        notes.unshift("Suggested values were read from the document. Check every field before saving.");
+      }
+      setReadNotes(notes);
+    } catch (err) {
+      setReadNotes([`Could not read the document: ${err instanceof Error ? err.message : "unknown error"}. Enter the fields by hand.`]);
+    } finally {
+      setReading(false);
+    }
   }
 
   function onDrop(e: DragEvent<HTMLDivElement>) {
@@ -197,6 +224,14 @@ export default function NewDepositPage() {
             />
           </div>
           {errors.file && <span className="mt-1 block text-xs text-red-600">{errors.file}</span>}
+          {reading && <p className="mt-2 text-sm text-indigo-700">Reading the document…</p>}
+          {readNotes.length > 0 && (
+            <ul className="mt-2 space-y-1 rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
+              {readNotes.map((note) => (
+                <li key={note}>• {note}</li>
+              ))}
+            </ul>
+          )}
         </div>
 
         <div className="flex items-center gap-3">

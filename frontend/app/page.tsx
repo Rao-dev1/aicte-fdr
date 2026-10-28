@@ -1,5 +1,15 @@
-import { redirect } from "next/navigation";
+"use client";
 
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
+
+// Sends visitors from the home address to the sign-in page.
 export default function Home() {
-  redirect("/login");
+  const router = useRouter();
+
+  useEffect(() => {
+    router.replace("/login");
+  }, [router]);
+
+  return null;
 }

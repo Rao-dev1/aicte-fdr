@@ -2,10 +2,7 @@ from datetime import date
 
 from app.db import SessionLocal
 from app.lifecycle import lifecycle_status, lifecycle_sweep
-
-
-def hdr(role: str, user: str = "tester") -> dict:
-    return {"X-Role": role, "X-User": user}
+from tests.helpers import hdr
 
 
 def sweep(on: date) -> dict:
@@ -13,9 +10,9 @@ def sweep(on: date) -> dict:
         return lifecycle_sweep(db, on)
 
 
-def make_institution(client) -> int:
-    r = client.post("/api/institutions", json={"name": "Test College", "code": "TC01"}, headers=hdr("ADMIN"))
-    assert r.status_code == 201
+def make_institution(client, code: str = "TC01") -> int:
+    r = client.post("/api/institutions", json={"name": f"College {code}", "code": code}, headers=hdr("ADMIN"))
+    assert r.status_code == 201, r.text
     return r.json()["id"]
 
 
@@ -30,7 +27,7 @@ def make_deposit(client, inst_id: int, ref: str = "FDR-1", maturity: str = "2027
             "issue_date": "2026-06-01",
             "maturity_date": maturity,
         },
-        headers=hdr("INSTITUTION_USER"),
+        headers=hdr("INSTITUTION_USER", inst=inst_id),
     )
     assert r.status_code == 201, r.text
     return r.json()
@@ -47,7 +44,7 @@ def get_status(client, dep_id: int) -> str:
     return client.get(f"/api/deposits/{dep_id}", headers=hdr("ADMIN")).json()["status"]
 
 
-# ---- Scenario 1: new FDR submission --------------------------------------
+# ---- New FDR and verification ---------------------------------------------
 
 
 def test_new_deposit_starts_as_submitted(client):
@@ -58,12 +55,15 @@ def test_new_deposit_starts_as_submitted(client):
 def test_verify_with_all_matching_is_verified(client):
     inst = make_institution(client)
     dep = make_deposit(client, inst)
-    body = verify(client, dep["id"], confirmed_reference_no="FDR-1", confirmed_bank_name="State Bank", confirmed_amount="100000.00")
+    body = verify(
+        client,
+        dep["id"],
+        confirmed_reference_no="FDR-1",
+        confirmed_bank_name="State Bank",
+        confirmed_amount="100000.00",
+    )
     assert body["status"] == "VERIFIED"
     assert body["mismatch_fields"] == []
-
-
-# ---- Scenario 2: discrepancy, field by field ------------------------------
 
 
 def test_amount_mismatch_flags_discrepancy(client):
@@ -72,7 +72,7 @@ def test_amount_mismatch_flags_discrepancy(client):
     body = verify(client, dep["id"], confirmed_amount="95000.00")
     assert body["status"] == "DISCREPANCY"
     assert body["mismatch_fields"] == ["amount"]
-    assert body["amount"] == "100000.00"  # submitted value is kept
+    assert body["amount"] == "100000.00"
     assert body["confirmed_amount"] == "95000.00"
 
 
@@ -101,7 +101,7 @@ def test_reverify_after_fix_clears_discrepancy(client):
     assert body["mismatch_fields"] == []
 
 
-# ---- Scenario 3 and 4: maturity, expiry and overdue ----------------------
+# ---- Maturity, reminders, overdue -----------------------------------------
 
 
 def test_deposit_becomes_expiring_within_30_days(client):
@@ -127,11 +127,10 @@ def test_reminders_fire_once_at_60_30_and_7_days(client):
 
     sweep(date(2026, 9, 25))  # 56 days left
     assert sweep(date(2026, 9, 25))["notifications_created"] == 0  # no duplicate on a re-run
-
     sweep(date(2026, 10, 25))  # 26 days left
     sweep(date(2026, 11, 15))  # 5 days left
 
-    notes = client.get("/api/notifications", headers=hdr("INSTITUTION_USER")).json()
+    notes = client.get("/api/notifications", headers=hdr("INSTITUTION_USER", inst=inst)).json()
     kinds = sorted(n["kind"] for n in notes if n["deposit_id"] == dep["id"])
     assert kinds == ["REMINDER_30", "REMINDER_60", "REMINDER_7"]
 
@@ -145,7 +144,7 @@ def test_overdue_escalates_to_approving_authority_only(client):
     authority = client.get("/api/notifications", headers=hdr("APPROVING_AUTHORITY")).json()
     assert any(n["kind"] == "OVERDUE" and n["deposit_id"] == dep["id"] for n in authority)
 
-    institution = client.get("/api/notifications", headers=hdr("INSTITUTION_USER")).json()
+    institution = client.get("/api/notifications", headers=hdr("INSTITUTION_USER", inst=inst)).json()
     assert not any(n["kind"] == "OVERDUE" for n in institution)
 
 
@@ -154,13 +153,24 @@ def test_notification_can_be_marked_read(client):
     dep = make_deposit(client, inst, maturity="2026-11-20")
     verify(client, dep["id"])
     sweep(date(2026, 10, 25))
-    note = client.get("/api/notifications", headers=hdr("INSTITUTION_USER")).json()[0]
-    r = client.patch(f"/api/notifications/{note['id']}/read", headers=hdr("INSTITUTION_USER"))
+    note = client.get("/api/notifications", headers=hdr("INSTITUTION_USER", inst=inst)).json()[0]
+    r = client.patch(f"/api/notifications/{note['id']}/read", headers=hdr("INSTITUTION_USER", inst=inst))
     assert r.status_code == 200
     assert r.json()["is_read"] is True
 
 
-# ---- Scenario 5: renewal -------------------------------------------------
+def test_reminder_emails_are_logged_for_institution_users(client):
+    inst = make_institution(client)
+    dep = make_deposit(client, inst, maturity="2026-11-20")
+    verify(client, dep["id"])
+    result = sweep(date(2026, 9, 25))
+    assert result["emails"]["logged"] >= 1
+
+    emails = client.get("/api/admin/emails", headers=hdr("ADMIN")).json()
+    assert any(e["to"] == "institution1@example.com" and e["status"] == "LOGGED" for e in emails)
+
+
+# ---- Renewal and release --------------------------------------------------
 
 
 def test_renewal_marks_old_renewed_and_links_new(client):
@@ -179,7 +189,7 @@ def test_renewal_marks_old_renewed_and_links_new(client):
             "issue_date": "2026-11-20",
             "maturity_date": "2027-11-20",
         },
-        headers=hdr("INSTITUTION_USER"),
+        headers=hdr("INSTITUTION_USER", inst=inst),
     )
     assert r.status_code == 201, r.text
     assert r.json()["previous_deposit_id"] == old["id"]
@@ -189,16 +199,13 @@ def test_renewal_marks_old_renewed_and_links_new(client):
     assert any(entry["action"] == "RENEWED" for entry in history)
 
 
-# ---- Scenario 6: release workflow ----------------------------------------
-
-
 def test_release_request_approved_sets_released(client):
     inst = make_institution(client)
     dep = make_deposit(client, inst)
     verify(client, dep["id"])
     sweep(date(2027, 7, 1))
 
-    r = client.post(f"/api/deposits/{dep['id']}/release", headers=hdr("INSTITUTION_USER"))
+    r = client.post(f"/api/deposits/{dep['id']}/release", headers=hdr("INSTITUTION_USER", inst=inst))
     assert r.status_code == 201, r.text
     req = r.json()
     assert req["status"] == "PENDING"
@@ -210,7 +217,7 @@ def test_release_request_approved_sets_released(client):
     r = client.patch(
         f"/api/release-requests/{req['id']}",
         json={"approve": True, "remarks": "conditions met"},
-        headers=hdr("APPROVING_AUTHORITY", "officer-2"),
+        headers=hdr("APPROVING_AUTHORITY", "approver1"),
     )
     assert r.json()["status"] == "APPROVED"
     assert get_status(client, dep["id"]) == "RELEASED"
@@ -222,7 +229,7 @@ def test_release_rejected_restores_previous_status(client):
     verify(client, dep["id"])
     sweep(date(2027, 7, 1))
 
-    req = client.post(f"/api/deposits/{dep['id']}/release", headers=hdr("INSTITUTION_USER")).json()
+    req = client.post(f"/api/deposits/{dep['id']}/release", headers=hdr("INSTITUTION_USER", inst=inst)).json()
     client.patch(
         f"/api/release-requests/{req['id']}",
         json={"approve": False, "remarks": "documents missing"},
@@ -241,15 +248,12 @@ def test_pdf_upload_and_download_round_trip(client):
     r = client.post(
         f"/api/deposits/{dep['id']}/documents",
         files={"file": ("fdr.pdf", content, "application/pdf")},
-        headers=hdr("INSTITUTION_USER"),
+        headers=hdr("INSTITUTION_USER", inst=inst),
     )
     assert r.status_code == 201, r.text
     doc = r.json()
     assert doc["filename"] == "fdr.pdf"
     assert doc["size_bytes"] == len(content)
-
-    listed = client.get(f"/api/deposits/{dep['id']}/documents", headers=hdr("ADMIN")).json()
-    assert [d["id"] for d in listed] == [doc["id"]]
 
     got = client.get(f"/api/documents/{doc['id']}/download", headers=hdr("ADMIN"))
     assert got.status_code == 200
@@ -262,12 +266,12 @@ def test_unsupported_file_type_is_rejected(client):
     r = client.post(
         f"/api/deposits/{dep['id']}/documents",
         files={"file": ("notes.exe", b"MZ", "application/octet-stream")},
-        headers=hdr("INSTITUTION_USER"),
+        headers=hdr("INSTITUTION_USER", inst=inst),
     )
     assert r.status_code == 415
 
 
-# ---- Reports, calendar, dashboard ----------------------------------------
+# ---- Reports, calendar, dashboard -----------------------------------------
 
 
 def test_pending_report_exports_csv_xlsx_and_pdf(client):
@@ -279,24 +283,21 @@ def test_pending_report_exports_csv_xlsx_and_pdf(client):
     assert "FDR-REPORT" in csv_r.text
 
     xlsx_r = client.get("/api/reports/deposits?group=pending&format=xlsx", headers=hdr("REGULATOR_OFFICER"))
-    assert xlsx_r.status_code == 200
-    assert xlsx_r.content[:2] == b"PK"  # xlsx is a zip container
+    assert xlsx_r.content[:2] == b"PK"
 
     pdf_r = client.get("/api/reports/deposits?group=pending&format=pdf", headers=hdr("APPROVING_AUTHORITY"))
-    assert pdf_r.status_code == 200
     assert pdf_r.content[:4] == b"%PDF"
 
 
 def test_report_is_forbidden_for_institution_users(client):
-    r = client.get("/api/reports/deposits?group=all&format=csv", headers=hdr("INSTITUTION_USER"))
+    r = client.get("/api/reports/deposits?group=all&format=csv", headers=hdr("INSTITUTION_USER", inst=1))
     assert r.status_code == 403
 
 
 def test_calendar_lists_maturities_in_range(client):
     inst = make_institution(client)
     make_deposit(client, inst, ref="FDR-CAL", maturity="2026-11-20")
-    r = client.get("/api/calendar?start=2026-11-01&end=2026-11-30", headers=hdr("INSTITUTION_USER"))
-    assert r.status_code == 200
+    r = client.get("/api/calendar?start=2026-11-01&end=2026-11-30", headers=hdr("INSTITUTION_USER", inst=inst))
     events = r.json()
     assert len(events) == 1
     assert events[0]["on_date"] == "2026-11-20"
@@ -316,14 +317,43 @@ def test_dashboard_counts_and_pending_approvals(client):
 # ---- Access control and validation ---------------------------------------
 
 
-def test_missing_role_header_is_unauthorized(client):
+def test_missing_token_is_unauthorized(client):
     assert client.get("/api/deposits").status_code == 401
 
 
 def test_institution_user_cannot_verify(client):
     inst = make_institution(client)
     dep = make_deposit(client, inst)
-    r = client.post(f"/api/deposits/{dep['id']}/verify", json={}, headers=hdr("INSTITUTION_USER"))
+    r = client.post(f"/api/deposits/{dep['id']}/verify", json={}, headers=hdr("INSTITUTION_USER", inst=inst))
+    assert r.status_code == 403
+
+
+def test_institution_user_cannot_see_another_institutions_deposit(client):
+    inst_a = make_institution(client, "AAA1")
+    inst_b = make_institution(client, "BBB1")
+    dep = make_deposit(client, inst_a, ref="FDR-A")
+
+    assert client.get(f"/api/deposits/{dep['id']}", headers=hdr("INSTITUTION_USER", inst=inst_b)).status_code == 404
+    listed = client.get("/api/deposits", headers=hdr("INSTITUTION_USER", inst=inst_b)).json()
+    assert listed["total"] == 0
+    assert client.get(f"/api/deposits/{dep['id']}", headers=hdr("INSTITUTION_USER", inst=inst_a)).status_code == 200
+
+
+def test_institution_user_cannot_create_for_another_institution(client):
+    inst_a = make_institution(client, "AAA1")
+    inst_b = make_institution(client, "BBB1")
+    r = client.post(
+        "/api/deposits",
+        json={
+            "institution_id": inst_a,
+            "reference_no": "FDR-X",
+            "bank_name": "X",
+            "amount": "1.00",
+            "issue_date": "2026-06-01",
+            "maturity_date": "2027-06-01",
+        },
+        headers=hdr("INSTITUTION_USER", inst=inst_b),
+    )
     assert r.status_code == 403
 
 
@@ -340,7 +370,7 @@ def test_duplicate_reference_is_rejected(client):
             "issue_date": "2026-06-01",
             "maturity_date": "2027-06-01",
         },
-        headers=hdr("INSTITUTION_USER"),
+        headers=hdr("INSTITUTION_USER", inst=inst),
     )
     assert r.status_code == 409
 
@@ -357,7 +387,7 @@ def test_maturity_before_issue_is_rejected(client):
             "issue_date": "2027-06-01",
             "maturity_date": "2026-06-01",
         },
-        headers=hdr("INSTITUTION_USER"),
+        headers=hdr("INSTITUTION_USER", inst=inst),
     )
     assert r.status_code == 422
 

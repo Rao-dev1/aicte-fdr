@@ -5,6 +5,7 @@ from datetime import date
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .email_service import deliver_queued, queue_for_role
 from .models import AuditLog, Deposit, Notification
 
 STATUSES = [
@@ -63,6 +64,7 @@ def _notify_once(db: Session, dep: Deposit, kind: str, role: str, message: str) 
     if exists is not None:
         return 0
     db.add(Notification(deposit_id=dep.id, kind=kind, role=role, message=message))
+    queue_for_role(db, role, f"FDR portal: {kind.replace('_', ' ').lower()}", message)
     return 1
 
 
@@ -111,4 +113,5 @@ def lifecycle_sweep(db: Session, today: date) -> dict:
             changed += 1
         notifications += _notifications_for(db, dep, today)
     db.commit()
-    return {"changed": changed, "notifications_created": notifications}
+    emails = deliver_queued(db)
+    return {"changed": changed, "notifications_created": notifications, "emails": emails}

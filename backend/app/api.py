@@ -1,19 +1,21 @@
 import uuid
-from dataclasses import dataclass
 from datetime import date
-from decimal import Decimal
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from . import reports, storage
+import os
+
+from . import extract, reports, storage
+from .auth import Actor, get_actor, require
 from .db import get_db
-from .lifecycle import REMINDED, STATUSES, TRACKED, lifecycle_sweep, mismatched_fields
-from .models import AuditLog, Deposit, Document, Institution, Notification, ReleaseRequest, utcnow
+from .lifecycle import REMINDED, STATUSES, TRACKED, mismatched_fields
+from .models import AuditLog, Deposit, Document, EmailLog, Institution, JobRun, Notification, ReleaseRequest, utcnow
+from .scheduler import run_daily_check, today_ist
 from .schemas import (
     AuditOut,
     CalendarEvent,
@@ -32,7 +34,6 @@ from .schemas import (
 
 router = APIRouter()
 
-ROLES = {"INSTITUTION_USER", "REGULATOR_OFFICER", "APPROVING_AUTHORITY", "ADMIN"}
 RENEWABLE = {"VERIFIED", "ACTIVE", "EXPIRING", "MATURED"}
 RELEASABLE = {"ACTIVE", "EXPIRING", "MATURED"}
 VERIFIABLE = {"SUBMITTED", "DISCREPANCY"}
@@ -41,31 +42,17 @@ ALLOWED_UPLOADS = {"application/pdf": ".pdf", "image/png": ".png", "image/jpeg":
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
 
-# ---- Identity -------------------------------------------------------------
-# Placeholder: trusts X-Role / X-User headers. Replace with verified login before real use.
+# ---- Scope: institution users only see their own institution --------------
 
 
-@dataclass
-class Actor:
-    name: str
-    role: str
+def in_scope(actor: Actor, dep: Deposit) -> bool:
+    return actor.role != "INSTITUTION_USER" or dep.institution_id == actor.institution_id
 
 
-def get_actor(x_role: str = Header(default=""), x_user: str = Header(default="")) -> Actor:
-    if x_role not in ROLES:
-        raise HTTPException(status_code=401, detail="Missing or unknown X-Role header")
-    return Actor(name=x_user or "anonymous", role=x_role)
-
-
-def require(*allowed: str):
-    """ADMIN may do everything. Other roles must be listed."""
-
-    def dependency(actor: Actor = Depends(get_actor)) -> Actor:
-        if actor.role != "ADMIN" and actor.role not in allowed:
-            raise HTTPException(status_code=403, detail=f"Role {actor.role} may not perform this action")
-        return actor
-
-    return dependency
+def scope_deposits(query, actor: Actor):
+    if actor.role == "INSTITUTION_USER":
+        return query.where(Deposit.institution_id == actor.institution_id)
+    return query
 
 
 # ---- Helpers --------------------------------------------------------------
@@ -75,9 +62,10 @@ def audit(db: Session, entity: str, entity_id: int, action: str, actor: str, det
     db.add(AuditLog(entity=entity, entity_id=entity_id, action=action, actor=actor, detail=detail))
 
 
-def get_deposit_or_404(db: Session, deposit_id: int) -> Deposit:
+def get_deposit_or_404(db: Session, deposit_id: int, actor: Actor) -> Deposit:
     dep = db.get(Deposit, deposit_id)
-    if dep is None:
+    # Same 404 for "missing" and "another institution's", so IDs cannot be probed.
+    if dep is None or not in_scope(actor, dep):
         raise HTTPException(status_code=404, detail="Deposit not found")
     return dep
 
@@ -87,17 +75,11 @@ def ensure_reference_free(db: Session, reference_no: str) -> None:
         raise HTTPException(status_code=409, detail=f"Reference {reference_no} already exists")
 
 
-def visible_to(actor: Actor, role: str) -> bool:
-    return actor.role == "ADMIN" or actor.role == role
-
-
 # ---- Institutions ---------------------------------------------------------
 
 
 @router.post("/institutions", status_code=201, response_model=InstitutionOut)
 def create_institution(body: InstitutionCreate, db: Session = Depends(get_db), actor: Actor = Depends(require())):
-    if actor.role != "ADMIN":
-        raise HTTPException(status_code=403, detail="Only ADMIN can create institutions")
     if db.scalar(select(Institution.id).where(Institution.code == body.code)) is not None:
         raise HTTPException(status_code=409, detail="Institution code already exists")
     inst = Institution(name=body.name, code=body.code)
@@ -109,7 +91,10 @@ def create_institution(body: InstitutionCreate, db: Session = Depends(get_db), a
 
 @router.get("/institutions", response_model=list[InstitutionOut])
 def list_institutions(db: Session = Depends(get_db), actor: Actor = Depends(get_actor)):
-    return db.scalars(select(Institution).order_by(Institution.id)).all()
+    query = select(Institution).order_by(Institution.id)
+    if actor.role == "INSTITUTION_USER":
+        query = query.where(Institution.id == actor.institution_id)
+    return db.scalars(query).all()
 
 
 # ---- Deposits -------------------------------------------------------------
@@ -121,6 +106,8 @@ def create_deposit(
     db: Session = Depends(get_db),
     actor: Actor = Depends(require("INSTITUTION_USER")),
 ):
+    if actor.role == "INSTITUTION_USER" and body.institution_id != actor.institution_id:
+        raise HTTPException(status_code=403, detail="You can only add FDRs for your own institution")
     if db.get(Institution, body.institution_id) is None:
         raise HTTPException(status_code=404, detail="Institution not found")
     ensure_reference_free(db, body.reference_no)
@@ -142,7 +129,7 @@ def list_deposits(
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_actor),
 ):
-    query = select(Deposit)
+    query = scope_deposits(select(Deposit), actor)
     if status:
         query = query.where(Deposit.status == status)
     if group:
@@ -158,12 +145,12 @@ def list_deposits(
 
 @router.get("/deposits/{deposit_id}", response_model=DepositOut)
 def get_deposit(deposit_id: int, db: Session = Depends(get_db), actor: Actor = Depends(get_actor)):
-    return get_deposit_or_404(db, deposit_id)
+    return get_deposit_or_404(db, deposit_id, actor)
 
 
 @router.get("/deposits/{deposit_id}/history", response_model=list[AuditOut])
 def deposit_history(deposit_id: int, db: Session = Depends(get_db), actor: Actor = Depends(get_actor)):
-    get_deposit_or_404(db, deposit_id)
+    get_deposit_or_404(db, deposit_id, actor)
     return db.scalars(
         select(AuditLog).where(AuditLog.entity == "deposit", AuditLog.entity_id == deposit_id).order_by(AuditLog.id)
     ).all()
@@ -176,7 +163,7 @@ def verify_deposit(
     db: Session = Depends(get_db),
     actor: Actor = Depends(require("REGULATOR_OFFICER")),
 ):
-    dep = get_deposit_or_404(db, deposit_id)
+    dep = get_deposit_or_404(db, deposit_id, actor)
     if dep.status not in VERIFIABLE:
         raise HTTPException(status_code=409, detail=f"Cannot verify a deposit in status {dep.status}")
 
@@ -204,7 +191,7 @@ def renew_deposit(
     db: Session = Depends(get_db),
     actor: Actor = Depends(require("INSTITUTION_USER")),
 ):
-    old = get_deposit_or_404(db, deposit_id)
+    old = get_deposit_or_404(db, deposit_id, actor)
     if old.status not in RENEWABLE:
         raise HTTPException(status_code=409, detail=f"Cannot renew a deposit in status {old.status}")
     if body.institution_id != old.institution_id:
@@ -222,7 +209,29 @@ def renew_deposit(
     return new
 
 
-# ---- Documents ------------------------------------------------------------
+# ---- Reading documents and suggesting fields ------------------------------
+
+
+def _read_upload(file: UploadFile) -> tuple[bytes, str]:
+    ext_known = file.content_type in ALLOWED_UPLOADS
+    if not ext_known:
+        raise HTTPException(status_code=415, detail="Only PDF, PNG and JPEG files are allowed")
+    data = file.file.read(MAX_UPLOAD_BYTES + 1)
+    if not data:
+        raise HTTPException(status_code=400, detail="File is empty")
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File is larger than 10 MB")
+    return data, file.content_type or "application/octet-stream"
+
+
+@router.post("/extract/fdr")
+def extract_fdr_fields(
+    file: UploadFile = File(...),
+    actor: Actor = Depends(require("INSTITUTION_USER", "REGULATOR_OFFICER")),
+):
+    """Suggests FDR fields from an uploaded file. Nothing is saved; the user confirms the values."""
+    data, content_type = _read_upload(file)
+    return extract.extract_fdr(data, content_type)
 
 
 @router.post("/deposits/{deposit_id}/documents", status_code=201, response_model=DocumentOut)
@@ -232,22 +241,14 @@ def upload_document(
     db: Session = Depends(get_db),
     actor: Actor = Depends(require("INSTITUTION_USER", "REGULATOR_OFFICER")),
 ):
-    dep = get_deposit_or_404(db, deposit_id)
-    ext = ALLOWED_UPLOADS.get(file.content_type or "")
-    if ext is None:
-        raise HTTPException(status_code=415, detail="Only PDF, PNG and JPEG files are allowed")
-    data = file.file.read(MAX_UPLOAD_BYTES + 1)
-    if not data:
-        raise HTTPException(status_code=400, detail="File is empty")
-    if len(data) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail="File is larger than 10 MB")
-
-    key = f"{uuid.uuid4().hex}{ext}"
+    dep = get_deposit_or_404(db, deposit_id, actor)
+    data, content_type = _read_upload(file)
+    key = f"{uuid.uuid4().hex}{ALLOWED_UPLOADS[content_type]}"
     storage.save(key, data)
     doc = Document(
         deposit_id=dep.id,
         filename=Path(file.filename or "upload").name[:255],
-        content_type=file.content_type or "application/octet-stream",
+        content_type=content_type,
         size_bytes=len(data),
         storage_key=key,
         uploaded_by=actor.name,
@@ -263,7 +264,7 @@ def upload_document(
 
 @router.get("/deposits/{deposit_id}/documents", response_model=list[DocumentOut])
 def list_documents(deposit_id: int, db: Session = Depends(get_db), actor: Actor = Depends(get_actor)):
-    get_deposit_or_404(db, deposit_id)
+    get_deposit_or_404(db, deposit_id, actor)
     return db.scalars(select(Document).where(Document.deposit_id == deposit_id).order_by(Document.id)).all()
 
 
@@ -272,10 +273,16 @@ def download_document(document_id: int, db: Session = Depends(get_db), actor: Ac
     doc = db.get(Document, document_id)
     if doc is None:
         raise HTTPException(status_code=404, detail="Document not found")
-    path = storage.path_for(doc.storage_key)
-    if not path.exists():
+    get_deposit_or_404(db, doc.deposit_id, actor)
+    content = storage.read(doc.storage_key)
+    if content is None:
         raise HTTPException(status_code=404, detail="File missing from storage")
-    return FileResponse(path, media_type=doc.content_type, filename=doc.filename)
+    safe_name = doc.filename.replace('"', "")
+    return Response(
+        content=content,
+        media_type=doc.content_type,
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+    )
 
 
 # ---- Release / refund -----------------------------------------------------
@@ -287,7 +294,7 @@ def request_release(
     db: Session = Depends(get_db),
     actor: Actor = Depends(require("INSTITUTION_USER")),
 ):
-    dep = get_deposit_or_404(db, deposit_id)
+    dep = get_deposit_or_404(db, deposit_id, actor)
     if dep.status not in RELEASABLE:
         raise HTTPException(status_code=409, detail=f"Cannot request release for status {dep.status}")
     pending = db.scalar(
@@ -312,7 +319,14 @@ def list_release_requests(
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_actor),
 ):
-    return db.scalars(select(ReleaseRequest).where(ReleaseRequest.status == status).order_by(ReleaseRequest.id)).all()
+    query = (
+        select(ReleaseRequest)
+        .join(Deposit, Deposit.id == ReleaseRequest.deposit_id)
+        .where(ReleaseRequest.status == status)
+    )
+    if actor.role == "INSTITUTION_USER":
+        query = query.where(Deposit.institution_id == actor.institution_id)
+    return db.scalars(query.order_by(ReleaseRequest.id)).all()
 
 
 @router.patch("/release-requests/{request_id}", response_model=ReleaseOut)
@@ -328,7 +342,7 @@ def decide_release(
     if rr.status != "PENDING":
         raise HTTPException(status_code=409, detail=f"Release request already {rr.status}")
 
-    dep = get_deposit_or_404(db, rr.deposit_id)
+    dep = db.get(Deposit, rr.deposit_id)
     if body.approve:
         rr.status = "APPROVED"
         dep.status = "RELEASED"
@@ -349,12 +363,18 @@ def decide_release(
 # ---- Notifications --------------------------------------------------------
 
 
-@router.get("/notifications", response_model=list[NotificationOut])
-def list_notifications(db: Session = Depends(get_db), actor: Actor = Depends(get_actor)):
-    query = select(Notification).order_by(Notification.id.desc()).limit(100)
+def _notification_query(actor: Actor):
+    query = select(Notification).join(Deposit, Deposit.id == Notification.deposit_id)
     if actor.role != "ADMIN":
         query = query.where(Notification.role == actor.role)
-    return db.scalars(query).all()
+    if actor.role == "INSTITUTION_USER":
+        query = query.where(Deposit.institution_id == actor.institution_id)
+    return query
+
+
+@router.get("/notifications", response_model=list[NotificationOut])
+def list_notifications(db: Session = Depends(get_db), actor: Actor = Depends(get_actor)):
+    return db.scalars(_notification_query(actor).order_by(Notification.id.desc()).limit(100)).all()
 
 
 @router.patch("/notifications/{notification_id}/read", response_model=NotificationOut)
@@ -363,13 +383,33 @@ def mark_notification_read(
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_actor),
 ):
-    n = db.get(Notification, notification_id)
-    if n is None or not visible_to(actor, n.role):
+    n = db.scalar(_notification_query(actor).where(Notification.id == notification_id))
+    if n is None:
         raise HTTPException(status_code=404, detail="Notification not found")
     n.is_read = True
     db.commit()
     db.refresh(n)
     return n
+
+
+@router.get("/admin/emails")
+def list_email_log(
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(require()),
+):
+    rows = db.scalars(select(EmailLog).order_by(EmailLog.id.desc()).limit(limit)).all()
+    return [
+        {
+            "id": r.id,
+            "to": r.to_address,
+            "subject": r.subject,
+            "status": r.status,
+            "error": r.error,
+            "created_at": r.created_at.isoformat(),
+        }
+        for r in rows
+    ]
 
 
 # ---- Calendar, dashboard, reports, jobs -----------------------------------
@@ -384,7 +424,7 @@ def calendar(
 ):
     if end < start:
         raise HTTPException(status_code=400, detail="end must be on or after start")
-    deposits = db.scalars(select(Deposit).where(Deposit.status.notin_(["RELEASED", "REJECTED", "RENEWED"]))).all()
+    query = scope_deposits(select(Deposit), actor).where(Deposit.status.notin_(["RELEASED", "REJECTED", "RENEWED"]))
     events = [
         CalendarEvent(
             on_date=d.effective_maturity,
@@ -394,7 +434,7 @@ def calendar(
             status=d.status,
             renewal_due=d.status in {"EXPIRING", "MATURED"},
         )
-        for d in deposits
+        for d in db.scalars(query).all()
         if start <= d.effective_maturity <= end
     ]
     return sorted(events, key=lambda e: e.on_date)
@@ -402,13 +442,15 @@ def calendar(
 
 @router.get("/dashboard/summary")
 def dashboard_summary(db: Session = Depends(get_db), actor: Actor = Depends(get_actor)):
-    rows = db.execute(select(Deposit.status, func.count()).group_by(Deposit.status)).all()
+    rows = db.execute(
+        scope_deposits(select(Deposit.status, func.count()), actor).group_by(Deposit.status)
+    ).all()
     counts = {status: 0 for status in STATUSES}
     counts.update({status: count for status, count in rows})
 
-    today = date.today()
+    today = today_ist()
     upcoming = []
-    for d in db.scalars(select(Deposit).where(Deposit.status.in_(TRACKED | REMINDED))).all():
+    for d in db.scalars(scope_deposits(select(Deposit), actor).where(Deposit.status.in_(TRACKED | REMINDED))).all():
         days_left = (d.effective_maturity - today).days
         if days_left <= 90:
             upcoming.append(
@@ -422,9 +464,16 @@ def dashboard_summary(db: Session = Depends(get_db), actor: Actor = Depends(get_
             )
     upcoming.sort(key=lambda item: item["days_left"])
 
-    pending_approvals = db.scalar(
-        select(func.count()).select_from(ReleaseRequest).where(ReleaseRequest.status == "PENDING")
-    ) or 0
+    pending_query = (
+        select(func.count())
+        .select_from(ReleaseRequest)
+        .join(Deposit, Deposit.id == ReleaseRequest.deposit_id)
+        .where(ReleaseRequest.status == "PENDING")
+    )
+    if actor.role == "INSTITUTION_USER":
+        pending_query = pending_query.where(Deposit.institution_id == actor.institution_id)
+    pending_approvals = db.scalar(pending_query) or 0
+
     return {
         "counts": counts,
         "total": sum(counts.values()),
@@ -458,12 +507,30 @@ def export_deposits(
 
 
 @router.post("/admin/lifecycle-sweep")
-def run_lifecycle_sweep(
-    as_of: Optional[date] = None,
+def run_lifecycle_sweep(actor: Actor = Depends(require())):
+    """Runs the daily maturity check now. The same check also runs every day on schedule."""
+    return run_daily_check(trigger="manual")
+
+
+@router.get("/admin/jobs")
+def list_job_runs(
+    limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
     actor: Actor = Depends(require()),
 ):
-    """Called daily by the scheduler (Inngest later). `as_of` lets an admin replay a date for testing."""
-    if actor.role != "ADMIN":
-        raise HTTPException(status_code=403, detail="Only ADMIN can run the sweep")
-    return lifecycle_sweep(db, as_of or date.today())
+    rows = db.scalars(select(JobRun).order_by(JobRun.id.desc()).limit(limit)).all()
+    return {
+        "schedule": os.getenv("DAILY_CHECK_TIME", "08:00") + " Indian time",
+        "runs": [
+            {
+                "id": r.id,
+                "job": r.job,
+                "trigger": r.trigger,
+                "status": r.status,
+                "detail": r.detail,
+                "started_at": r.started_at.isoformat(),
+                "finished_at": r.finished_at.isoformat() if r.finished_at else None,
+            }
+            for r in rows
+        ],
+    }

@@ -116,7 +116,7 @@ export default function DashboardPage() {
                 <Link
                   key={card.key}
                   href={`/deposits?group=${card.key}`}
-                  className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm hover:border-indigo-300"
+                  className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm hover:border-blue-300"
                 >
                   <p className="text-sm text-slate-600">{card.label}</p>
                   <p className="mt-2 text-3xl font-bold">{count}</p>
@@ -130,7 +130,7 @@ export default function DashboardPage() {
               <p className="text-sm text-slate-600">Total deposits</p>
               <p className="mt-2 text-3xl font-bold">{data.total}</p>
             </div>
-            <Link href="/approvals" className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm hover:border-indigo-300">
+            <Link href="/approvals" className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm hover:border-blue-300">
               <p className="text-sm text-slate-600">Release requests awaiting approval</p>
               <p className="mt-2 text-3xl font-bold">{data.pending_approvals}</p>
             </Link>
@@ -191,7 +191,7 @@ export default function DashboardPage() {
                   {data.upcoming.map((u) => (
                     <tr key={u.deposit_id} className="border-t border-slate-100">
                       <td className="px-4 py-3">
-                        <Link href={`/deposits/${u.deposit_id}`} className="text-indigo-700 hover:underline">
+                        <Link href={`/deposits/${u.deposit_id}`} className="text-blue-700 hover:underline">
                           {u.reference_no}
                         </Link>
                       </td>

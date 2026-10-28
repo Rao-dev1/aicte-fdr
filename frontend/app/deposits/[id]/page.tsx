@@ -136,7 +136,7 @@ function DepositDetail() {
     return (
       <Shell>
         <Notice kind="error">{error}</Notice>
-        <Link href="/deposits" className="text-indigo-700 hover:underline">
+        <Link href="/deposits" className="text-blue-700 hover:underline">
           Back to deposits
         </Link>
       </Shell>
@@ -158,7 +158,7 @@ function DepositDetail() {
   return (
     <Shell>
       <div className="mb-2">
-        <Link href="/deposits" className="text-sm text-indigo-700 hover:underline">
+        <Link href="/deposits" className="text-sm text-blue-700 hover:underline">
           ← All deposits
         </Link>
       </div>
@@ -233,7 +233,7 @@ function DepositDetail() {
                   <span className="font-medium">Observations</span>
                   <textarea className={field} rows={2} value={observations} onChange={(e) => setObservations(e.target.value)} />
                 </label>
-                <button disabled={busy} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60 sm:col-span-2 sm:w-fit">
+                <button disabled={busy} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60 sm:col-span-2 sm:w-fit">
                   Save verification
                 </button>
               </form>
@@ -244,7 +244,7 @@ function DepositDetail() {
             <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="flex items-center justify-between">
                 <h2 className="font-semibold">Renew FDR</h2>
-                <button onClick={() => setShowRenew((s) => !s)} className="text-sm text-indigo-700 hover:underline">
+                <button onClick={() => setShowRenew((s) => !s)} className="text-sm text-blue-700 hover:underline">
                   {showRenew ? "Hide" : "Start renewal"}
                 </button>
               </div>
@@ -268,7 +268,7 @@ function DepositDetail() {
                       />
                     </label>
                   ))}
-                  <button disabled={busy} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60 sm:col-span-2 sm:w-fit">
+                  <button disabled={busy} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60 sm:col-span-2 sm:w-fit">
                     Submit renewal
                   </button>
                 </form>
@@ -288,7 +288,7 @@ function DepositDetail() {
                       {(doc.size_bytes / 1024).toFixed(0)} KB · {doc.uploaded_by} · {dateTime(doc.uploaded_at)}
                     </p>
                   </div>
-                  <button onClick={() => downloadFile(`/documents/${doc.id}/download`, doc.filename)} className="text-indigo-700 hover:underline">
+                  <button onClick={() => downloadFile(`/documents/${doc.id}/download`, doc.filename)} className="text-blue-700 hover:underline">
                     Download
                   </button>
                 </li>
@@ -324,7 +324,7 @@ function DepositDetail() {
               {canDecide && deposit.status === "RELEASE_REQUESTED" && (
                 <p className="text-slate-600">
                   A release is waiting for a decision.{" "}
-                  <Link href="/approvals" className="text-indigo-700 hover:underline">
+                  <Link href="/approvals" className="text-blue-700 hover:underline">
                     Open approvals
                   </Link>
                 </p>

@@ -97,14 +97,14 @@ export default function CalendarPage() {
             const isToday = key === todayKey;
             return (
               <div key={key} className="min-h-28 border-b border-r border-slate-100 p-1.5">
-                <p className={`text-xs ${isToday ? "inline-block rounded-full bg-indigo-600 px-1.5 text-white" : "text-slate-500"}`}>{day.getDate()}</p>
+                <p className={`text-xs ${isToday ? "inline-block rounded-full bg-blue-600 px-1.5 text-white" : "text-slate-500"}`}>{day.getDate()}</p>
                 <ul className="mt-1 space-y-1">
                   {dayEvents.map((e) => (
                     <li key={`${e.deposit_id}-${e.on_date}`}>
                       <Link
                         href={`/deposits/${e.deposit_id}`}
                         className={`block truncate rounded px-1.5 py-0.5 text-xs ${
-                          e.renewal_due ? "bg-amber-100 text-amber-900 hover:bg-amber-200" : "bg-indigo-50 text-indigo-800 hover:bg-indigo-100"
+                          e.renewal_due ? "bg-amber-100 text-amber-900 hover:bg-amber-200" : "bg-blue-50 text-blue-800 hover:bg-blue-100"
                         }`}
                         title={`${e.reference_no} · ${e.status}`}
                       >

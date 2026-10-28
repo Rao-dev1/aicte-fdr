@@ -65,7 +65,8 @@ function Field({
   );
 }
 
-const inputClass = "mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm";
+const inputClass =
+  "mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100";
 
 export default function NewDepositPage() {
   const router = useRouter();
@@ -165,7 +166,11 @@ export default function NewDepositPage() {
 
       {serverError && <Notice kind="error">{serverError}</Notice>}
 
-      <form onSubmit={submit} noValidate className="grid max-w-3xl gap-5 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+      <form onSubmit={submit} noValidate className="grid max-w-3xl gap-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
+        <div>
+          <h2 className="text-base font-semibold text-[#0f2d52]">FDR details</h2>
+          <p className="mt-1 text-sm text-slate-500">Copy these from the bank receipt. Fields are filled in from the document when it can be read.</p>
+        </div>
         <div className="grid gap-5 sm:grid-cols-2">
           <Field label="Institution" name="institution_id" error={errors.institution_id}>
             <select id="institution_id" className={inputClass} value={form.institution_id} onChange={(e) => update("institution_id", e.target.value)}>
@@ -195,7 +200,7 @@ export default function NewDepositPage() {
         </div>
 
         <div>
-          <span className="text-sm font-medium">FDR document</span>
+          <h2 className="text-base font-semibold text-[#0f2d52]">FDR document</h2>
           <div
             onDragOver={(e) => {
               e.preventDefault();
@@ -204,16 +209,20 @@ export default function NewDepositPage() {
             onDragLeave={() => setDragging(false)}
             onDrop={onDrop}
             onClick={() => inputRef.current?.click()}
-            className={`mt-1 cursor-pointer rounded-xl border-2 border-dashed p-8 text-center text-sm ${
-              dragging ? "border-indigo-500 bg-indigo-50" : "border-slate-300 hover:bg-slate-50"
+            className={`mt-3 flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 text-center text-sm transition-colors ${
+              dragging ? "border-blue-500 bg-blue-50" : "border-slate-300 bg-slate-50/60 hover:border-blue-400 hover:bg-blue-50/50"
             }`}
           >
+            <span className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-blue-100 text-xl text-blue-700">⇪</span>
             {file ? (
               <p>
-                <span className="font-medium">{file.name}</span> · {(file.size / 1024).toFixed(0)} KB
+                <span className="font-medium text-[#0f2d52]">{file.name}</span> · {(file.size / 1024).toFixed(0)} KB
               </p>
             ) : (
-              <p className="text-slate-600">Drag a PDF, PNG or JPEG here, or click to choose a file (max 10 MB)</p>
+              <>
+                <p className="font-medium text-slate-800">Click to upload or drag and drop</p>
+                <p className="mt-1 text-xs text-slate-500">PDF, PNG or JPEG (max 10 MB)</p>
+              </>
             )}
             <input
               ref={inputRef}
@@ -224,7 +233,7 @@ export default function NewDepositPage() {
             />
           </div>
           {errors.file && <span className="mt-1 block text-xs text-red-600">{errors.file}</span>}
-          {reading && <p className="mt-2 text-sm text-indigo-700">Reading the document…</p>}
+          {reading && <p className="mt-2 text-sm text-blue-700">Reading the document…</p>}
           {readNotes.length > 0 && (
             <ul className="mt-2 space-y-1 rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
               {readNotes.map((note) => (
@@ -238,7 +247,7 @@ export default function NewDepositPage() {
           <button
             type="submit"
             disabled={saving}
-            className="rounded-lg bg-indigo-600 px-5 py-2.5 font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
+            className="rounded-lg bg-[#0f2d52] px-5 py-2.5 font-medium text-white shadow-sm hover:bg-[#123a6b] disabled:opacity-60"
           >
             {saving ? "Saving…" : "Submit FDR"}
           </button>

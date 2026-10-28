@@ -54,18 +54,18 @@ export default function NotificationsPage() {
             <li
               key={n.id}
               className={`flex flex-wrap items-start justify-between gap-3 rounded-xl border p-4 text-sm ${
-                n.is_read ? "border-slate-200 bg-white" : "border-indigo-200 bg-indigo-50"
+                n.is_read ? "border-slate-200 bg-white" : "border-blue-200 bg-blue-50"
               }`}
             >
               <div>
                 <p className="font-medium">
                   {KIND_LABELS[n.kind] ?? n.kind}{" "}
-                  {!n.is_read && <span className="ml-2 rounded-full bg-indigo-600 px-2 py-0.5 text-xs text-white">New</span>}
+                  {!n.is_read && <span className="ml-2 rounded-full bg-blue-600 px-2 py-0.5 text-xs text-white">New</span>}
                 </p>
                 <p className="mt-1 text-slate-700">{n.message}</p>
                 <p className="mt-1 text-xs text-slate-500">
                   {dateTime(n.created_at)} ·{" "}
-                  <Link href={`/deposits/${n.deposit_id}`} className="text-indigo-700 hover:underline">
+                  <Link href={`/deposits/${n.deposit_id}`} className="text-blue-700 hover:underline">
                     Open deposit
                   </Link>
                 </p>

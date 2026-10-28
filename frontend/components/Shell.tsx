@@ -47,33 +47,55 @@ export function Shell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
-      <aside className="border-b border-slate-200 bg-white md:w-60 md:border-b-0 md:border-r">
-        <div className="p-5">
-          <p className="text-xs font-semibold uppercase tracking-wide text-indigo-600">AICTE FDR Portal</p>
-          <p className="mt-1 text-sm font-medium">{session.user}</p>
-          <p className="text-xs text-slate-500">{ROLE_LABELS[session.role]}</p>
+      <aside className="bg-gradient-to-b from-[#0f2d52] to-[#0a2140] text-white md:sticky md:top-0 md:flex md:h-screen md:w-64 md:flex-col">
+        <div className="flex items-center gap-3 px-5 pb-4 pt-5">
+          <span className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-sm font-bold ring-1 ring-white/30">
+            AI
+          </span>
+          <div>
+            <p className="text-base font-semibold leading-tight">AICTE</p>
+            <p className="text-xs text-blue-200">FDR Management Portal</p>
+          </div>
         </div>
-        <nav className="flex flex-wrap gap-1 px-3 pb-4 md:flex-col">
+
+        <nav className="flex flex-wrap gap-1 px-3 pb-3 md:flex-1 md:flex-col">
           {NAV[session.role].map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             return (
               <Link
                 key={item.href}
                 href={item.href}
-                className={`rounded-lg px-3 py-2 text-sm ${
-                  active ? "bg-indigo-50 font-medium text-indigo-700" : "text-slate-700 hover:bg-slate-100"
+                className={`rounded-lg px-3 py-2 text-sm transition-colors ${
+                  active
+                    ? "bg-white/15 font-medium text-white shadow-inner ring-1 ring-white/20"
+                    : "text-blue-100 hover:bg-white/10 hover:text-white"
                 }`}
               >
                 {item.label}
               </Link>
             );
           })}
-          <button onClick={signOut} className="rounded-lg px-3 py-2 text-left text-sm text-slate-500 hover:bg-slate-100">
+        </nav>
+
+        <div className="border-t border-white/10 px-5 py-4">
+          <div className="flex items-center gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-500 text-sm font-semibold uppercase">
+              {session.user.charAt(0)}
+            </span>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium">{session.user}</p>
+              <p className="truncate text-xs text-blue-200">{ROLE_LABELS[session.role]}</p>
+            </div>
+          </div>
+          <button
+            onClick={signOut}
+            className="mt-3 w-full rounded-lg border border-white/20 px-3 py-1.5 text-sm text-blue-100 hover:bg-white/10 hover:text-white"
+          >
             Sign out
           </button>
-        </nav>
+        </div>
       </aside>
-      <main className="flex-1 p-4 sm:p-6 md:p-10">{children}</main>
+      <main className="min-w-0 flex-1 p-4 sm:p-6 md:p-10">{children}</main>
     </div>
   );
 }
@@ -96,8 +118,8 @@ export function StatusBadge({ status }: { status: string }) {
 
 export function PageTitle({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
-    <div className="mb-6">
-      <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
+    <div className="mb-6 border-b border-slate-200 pb-4">
+      <h1 className="text-2xl font-bold tracking-tight text-[#0f2d52]">{title}</h1>
       {subtitle && <p className="mt-1 text-sm text-slate-600">{subtitle}</p>}
     </div>
   );

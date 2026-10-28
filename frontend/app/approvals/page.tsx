@@ -59,7 +59,7 @@ export default function ApprovalsPage() {
                 <div>
                   <p className="font-semibold">
                     Request #{r.id} for{" "}
-                    <Link href={`/deposits/${r.deposit_id}`} className="text-indigo-700 hover:underline">
+                    <Link href={`/deposits/${r.deposit_id}`} className="text-blue-700 hover:underline">
                       deposit #{r.deposit_id}
                     </Link>
                   </p>

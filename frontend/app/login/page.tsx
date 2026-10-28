@@ -5,6 +5,8 @@ import { FormEvent, useState } from "react";
 import { Notice } from "@/components/Shell";
 import { api, ApiError, LoginResult, setSession } from "@/lib/api";
 
+const AUDIENCES = ["For Institutions", "For Scrutiny Officers", "For Approving Authorities", "For Administrators"];
+
 export default function LoginPage() {
   const router = useRouter();
   const [username, setUsername] = useState("");
@@ -36,47 +38,75 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center p-6">
-      <div className="w-full max-w-md rounded-2xl border border-slate-300 bg-white p-8 shadow-md">
-        <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700">AICTE Regulation Bureau</p>
-        <h1 className="mt-2 text-2xl font-bold text-slate-900">Sign in</h1>
-        <p className="mt-1 text-sm text-slate-600">Use the account your administrator gave you.</p>
-
-        <div className="mt-6">
-          {error && <Notice kind="error">{error}</Notice>}
+    <main className="grid min-h-screen md:grid-cols-[1.05fr_1fr]">
+      <section className="flex flex-col justify-between bg-gradient-to-br from-[#0f2d52] via-[#123a6b] to-[#0a2140] p-8 text-white md:p-12">
+        <div className="flex items-center gap-3">
+          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white/15 text-base font-bold ring-1 ring-white/30">
+            AI
+          </span>
+          <div>
+            <p className="text-lg font-semibold leading-tight">AICTE</p>
+            <p className="text-sm text-blue-200">FDR Management Portal</p>
+          </div>
         </div>
 
-        <form onSubmit={submit} className="space-y-4">
-          <label className="block">
-            <span className="text-sm font-medium text-slate-800">Username</span>
-            <input
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              autoComplete="username"
-              className="mt-1 w-full rounded-lg border border-slate-400 bg-white px-3 py-2 text-slate-900"
-            />
-          </label>
+        <div className="my-10 md:my-0">
+          <p className="text-sm font-medium uppercase tracking-wider text-blue-200">Secure · Transparent · Compliant</p>
+          <h2 className="mt-3 text-3xl font-bold leading-tight md:text-4xl">Security deposits and FDRs, in one place.</h2>
+          <ul className="mt-8 space-y-3">
+            {AUDIENCES.map((label) => (
+              <li key={label} className="flex items-center gap-3 text-blue-100">
+                <span className="h-2 w-2 rounded-full bg-blue-300" />
+                {label}
+              </li>
+            ))}
+          </ul>
+        </div>
 
-          <label className="block">
-            <span className="text-sm font-medium text-slate-800">Password</span>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
-              className="mt-1 w-full rounded-lg border border-slate-400 bg-white px-3 py-2 text-slate-900"
-            />
-          </label>
+        <p className="text-xs text-blue-200">All India Council for Technical Education</p>
+      </section>
 
-          <button
-            type="submit"
-            disabled={busy}
-            className="w-full rounded-lg bg-indigo-600 px-4 py-2.5 font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
-          >
-            {busy ? "Signing in…" : "Sign in"}
-          </button>
-        </form>
-      </div>
+      <section className="flex items-center justify-center bg-slate-50 p-6 md:p-12">
+        <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-lg">
+          <h1 className="text-2xl font-bold text-[#0f2d52]">Welcome back</h1>
+          <p className="mt-1 text-sm text-slate-600">Sign in with the account your administrator gave you.</p>
+
+          <div className="mt-6">{error && <Notice kind="error">{error}</Notice>}</div>
+
+          <form onSubmit={submit} className="space-y-4">
+            <label className="block">
+              <span className="text-sm font-medium text-slate-800">Username</span>
+              <input
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                autoComplete="username"
+                placeholder="e.g. institution1"
+                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-slate-900 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
+              />
+            </label>
+
+            <label className="block">
+              <span className="text-sm font-medium text-slate-800">Password</span>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+                placeholder="Enter your password"
+                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-slate-900 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
+              />
+            </label>
+
+            <button
+              type="submit"
+              disabled={busy}
+              className="w-full rounded-lg bg-[#0f2d52] px-4 py-2.5 font-medium text-white shadow-sm hover:bg-[#123a6b] disabled:opacity-60"
+            >
+              {busy ? "Signing in…" : "Sign in"}
+            </button>
+          </form>
+        </div>
+      </section>
     </main>
   );
 }

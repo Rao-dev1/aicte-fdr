@@ -72,7 +72,7 @@ function DepositsList() {
               </button>
             ))}
           {canCreate && (
-            <Link href="/deposits/new" className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700">
+            <Link href="/deposits/new" className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700">
               New FDR
             </Link>
           )}
@@ -85,7 +85,7 @@ function DepositsList() {
             key={g.key}
             onClick={() => router.push(`/deposits?group=${g.key}`)}
             className={`rounded-full px-3 py-1.5 text-sm ${
-              group === g.key ? "bg-indigo-600 text-white" : "bg-white text-slate-700 ring-1 ring-slate-300 hover:bg-slate-50"
+              group === g.key ? "bg-blue-600 text-white" : "bg-white text-slate-700 ring-1 ring-slate-300 hover:bg-slate-50"
             }`}
           >
             {g.label}
@@ -111,7 +111,7 @@ function DepositsList() {
             {data?.items.map((d: Deposit) => (
               <tr key={d.id} className="border-t border-slate-100 hover:bg-slate-50">
                 <td className="px-4 py-3">
-                  <Link href={`/deposits/${d.id}`} className="font-medium text-indigo-700 hover:underline">
+                  <Link href={`/deposits/${d.id}`} className="font-medium text-blue-700 hover:underline">
                     {d.reference_no}
                   </Link>
                   {d.mismatch_fields.length > 0 && <span className="ml-2 text-xs text-red-600">mismatch</span>}

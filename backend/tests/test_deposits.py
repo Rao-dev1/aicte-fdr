@@ -188,17 +188,12 @@ def test_reminder_emails_are_logged_for_the_owning_institution_only(client):
 # ---- Renewal and release --------------------------------------------------
 
 
-def test_renewal_marks_old_renewed_and_links_new(client):
-    inst = make_institution(client)
-    old = make_deposit(client, inst, ref="FDR-OLD", maturity="2026-11-20")
-    verify(client, old["id"])
-    sweep(date(2026, 11, 1))
-
-    r = client.post(
-        f"/api/deposits/{old['id']}/renew",
+def propose_renewal(client, inst, old_id, ref="FDR-NEW"):
+    return client.post(
+        f"/api/deposits/{old_id}/renew",
         json={
             "institution_id": inst,
-            "reference_no": "FDR-NEW",
+            "reference_no": ref,
             "bank_name": "State Bank",
             "amount": "100000.00",
             "issue_date": "2026-11-20",
@@ -206,14 +201,70 @@ def test_renewal_marks_old_renewed_and_links_new(client):
         },
         headers=hdr("INSTITUTION_USER", inst=inst),
     )
+
+
+def test_renewal_waits_for_approval_then_marks_old_renewed(client):
+    inst = make_institution(client)
+    old = make_deposit(client, inst, ref="FDR-OLD", maturity="2026-11-20")
+    verify(client, old["id"])
+    sweep(date(2026, 11, 1))
+
+    r = propose_renewal(client, inst, old["id"])
     assert r.status_code == 201, r.text
-    assert r.json()["previous_deposit_id"] == old["id"]
+    assert r.json()["status"] == "PENDING"
+    assert get_status(client, old["id"]) != "RENEWED"
+
+    rid = r.json()["id"]
+    approved = client.patch(
+        f"/api/renewal-requests/{rid}",
+        json={"approve": True, "remarks": "ok"},
+        headers=hdr("APPROVING_AUTHORITY"),
+    )
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["status"] == "APPROVED"
     assert get_status(client, old["id"]) == "RENEWED"
+
+    created = approved.json()["created_deposit_id"]
+    new = client.get(f"/api/deposits/{created}", headers=hdr("INSTITUTION_USER", inst=inst)).json()
+    assert new["previous_deposit_id"] == old["id"]
+    assert new["reference_no"] == "FDR-NEW"
 
     history = client.get(f"/api/deposits/{old['id']}/history", headers=hdr("ADMIN")).json()
     assert any(entry["action"] == "RENEWED" for entry in history)
 
 
+def test_rejected_renewal_leaves_the_fdr_unchanged(client):
+    inst = make_institution(client)
+    old = make_deposit(client, inst, ref="FDR-KEEP", maturity="2026-11-20")
+    verify(client, old["id"])
+    sweep(date(2026, 11, 1))
+    before = get_status(client, old["id"])
+
+    rid = propose_renewal(client, inst, old["id"], ref="FDR-NOPE").json()["id"]
+    r = client.patch(f"/api/renewal-requests/{rid}", json={"approve": False, "remarks": "wrong amount"}, headers=hdr("APPROVING_AUTHORITY"))
+    assert r.status_code == 200 and r.json()["status"] == "REJECTED"
+    assert get_status(client, old["id"]) == before
+    # the number is still free, so a corrected request can be made
+    assert propose_renewal(client, inst, old["id"], ref="FDR-NOPE").status_code == 201
+
+
+def test_only_one_renewal_can_wait_at_a_time(client):
+    inst = make_institution(client)
+    old = make_deposit(client, inst, ref="FDR-ONE", maturity="2026-11-20")
+    verify(client, old["id"])
+    sweep(date(2026, 11, 1))
+    assert propose_renewal(client, inst, old["id"], ref="FDR-A").status_code == 201
+    assert propose_renewal(client, inst, old["id"], ref="FDR-B").status_code == 409
+
+
+def test_institution_cannot_approve_its_own_renewal(client):
+    inst = make_institution(client)
+    old = make_deposit(client, inst, ref="FDR-SELF", maturity="2026-11-20")
+    verify(client, old["id"])
+    sweep(date(2026, 11, 1))
+    rid = propose_renewal(client, inst, old["id"], ref="FDR-X").json()["id"]
+    r = client.patch(f"/api/renewal-requests/{rid}", json={"approve": True}, headers=hdr("INSTITUTION_USER", inst=inst))
+    assert r.status_code == 403
 def test_release_request_approved_sets_released(client):
     inst = make_institution(client)
     dep = make_deposit(client, inst)

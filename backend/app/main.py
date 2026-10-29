@@ -12,7 +12,8 @@ from .api import router
 from .auth import _secret
 from .auth_routes import router as auth_router
 from .db import SessionLocal, engine
-from .migrations import ensure_user_phone_column
+from .crypto import require_key
+from .migrations import ensure_document_version_columns, ensure_encrypted_deposit_fields, ensure_user_phone_column
 from .models import Base
 from .scheduler import start_scheduler
 from .seed import seed_demo_users
@@ -25,6 +26,9 @@ async def lifespan(app: FastAPI):
     # Creates tables if missing.
     Base.metadata.create_all(bind=engine)
     ensure_user_phone_column()  # adds users.phone on databases created before SMS support
+    ensure_document_version_columns()  # adds version columns on databases created before version history
+    require_key()  # refuses to start without FIELD_ENCRYPTION_KEY
+    ensure_encrypted_deposit_fields()  # encrypts FDR numbers and bank names saved before encryption
     with SessionLocal() as db:
         ensure_default_regulations_seeded(db)
         # Seed demo users if SEED_DEMO=1 (default for local development)

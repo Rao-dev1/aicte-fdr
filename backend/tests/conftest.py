@@ -7,6 +7,7 @@ os.environ["SEED_DEMO"] = "0"  # the fixture seeds explicitly below
 os.environ["SCHEDULER_ENABLED"] = "0"  # tests start the scheduler themselves when needed
 os.environ["MSG91_AUTH_KEY"] = ""  # tests must never send real SMS; they are only logged
 os.environ["SENDGRID_API_KEY"] = ""  # tests must never send real email; emails are only logged
+os.environ.setdefault("FIELD_ENCRYPTION_KEY", __import__("cryptography.fernet", fromlist=["Fernet"]).Fernet.generate_key().decode())
 os.environ["AUTH_JWT_SECRET"] = "test-only-secret-that-is-long-enough-for-sha256-0123456789"
 
 import pytest  # noqa: E402

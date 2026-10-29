@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from .crypto import bank_hash, fdr_number_hash
 from .auth import Actor, get_actor, require
 from .db import get_db
 from .models import Deposit, Institution, IntegrityFinding, RegulationRule, ReleaseRequest
@@ -116,13 +117,13 @@ def search_trace_records(
     if actor.role == "INSTITUTION_USER":
         query = query.where(Deposit.institution_id == actor.institution_id)
 
+    # Names are encrypted, so search matches the whole FDR number or bank name exactly.
     if q:
-        term = f"%{q.strip()}%"
-        query = query.where(or_(Deposit.reference_no.ilike(term), Deposit.bank_name.ilike(term)))
+        query = query.where(or_(Deposit.reference_hash == fdr_number_hash(q), Deposit.bank_hash == bank_hash(q)))
     if status:
         query = query.where(Deposit.status == status)
     if bank_name:
-        query = query.where(Deposit.bank_name.ilike(f"%{bank_name.strip()}%"))
+        query = query.where(Deposit.bank_hash == bank_hash(bank_name))
 
     total = db.scalar(select(Deposit.id).select_from(query.subquery())) or 0
     items = db.scalars(query.order_by(Deposit.id.desc()).offset((page - 1) * page_size).limit(page_size)).all()

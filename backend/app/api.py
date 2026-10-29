@@ -1,20 +1,23 @@
+import json
 import uuid
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 import os
 
-from . import extract, reports, storage
+from . import bulk_import, extract, reports, storage
+from .crypto import fdr_number_hash
 from .auth import Actor, get_actor, require
 from .db import get_db
 from .lifecycle import REMINDED, STATUSES, TRACKED, mismatched_fields
-from .models import AuditLog, Deposit, Document, EmailLog, Institution, JobRun, Notification, ReleaseRequest, SmsLog, utcnow
+from .models import AuditLog, Deposit, Document, EmailLog, Institution, JobRun, Notification, ReleaseRequest, RenewalRequest, SmsLog, utcnow
 from .scheduler import run_daily_check, today_ist
 from .services import deadline_service, deficiency_service, trace_service
 from .schemas import (
@@ -32,6 +35,8 @@ from .schemas import (
     NotificationOut,
     ReleaseDecision,
     ReleaseOut,
+    RenewalDecision,
+    RenewalOut,
     RenewIn,
     VerifyIn,
 )
@@ -75,7 +80,7 @@ def get_deposit_or_404(db: Session, deposit_id: int, actor: Actor) -> Deposit:
 
 
 def ensure_reference_free(db: Session, reference_no: str) -> None:
-    if db.scalar(select(Deposit.id).where(Deposit.reference_no == reference_no)) is not None:
+    if db.scalar(select(Deposit.id).where(Deposit.reference_hash == fdr_number_hash(reference_no))) is not None:
         raise HTTPException(status_code=409, detail=f"Reference {reference_no} already exists")
 
 
@@ -131,6 +136,111 @@ def create_deposit(
     db.commit()
     db.refresh(dep)
     return dep
+
+
+# ---- Bulk import of FDRs ----------------------------------------------------
+
+
+def _import_institution(db: Session, actor: Actor, institution_id: Optional[int]) -> Institution:
+    if actor.role == "INSTITUTION_USER":
+        institution_id = actor.institution_id
+    if institution_id is None:
+        raise HTTPException(status_code=400, detail="Choose the institution these FDRs belong to")
+    inst = db.get(Institution, institution_id)
+    if inst is None:
+        raise HTTPException(status_code=404, detail="Institution not found")
+    return inst
+
+
+def _read_import(file: UploadFile) -> list[dict]:
+    data = file.file.read(bulk_import.MAX_IMPORT_BYTES + 1)
+    try:
+        return bulk_import.read_table(data, file.filename or "")
+    except bulk_import.ImportFileError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+def _checked_import(db: Session, file: UploadFile) -> list[dict]:
+    rows = _read_import(file)
+    refs = [r["reference_no"].strip() for r in rows if r["reference_no"].strip()]
+    hashes = [fdr_number_hash(r) for r in refs]
+    existing = {d.reference_no.strip().lower() for d in db.scalars(select(Deposit).where(Deposit.reference_hash.in_(hashes)))} if hashes else set()
+    return bulk_import.check_rows(rows, existing)
+
+
+@router.get("/deposits/import/template")
+def import_template(actor: Actor = Depends(require("INSTITUTION_USER"))):
+    return Response(
+        content=bulk_import.template_csv(),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="fdr-import-template.csv"'},
+    )
+
+
+@router.post("/deposits/import/preview")
+def preview_import(
+    file: UploadFile = File(...),
+    institution_id: Optional[int] = Form(None),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(require("INSTITUTION_USER")),
+):
+    """Check the file and show every row. Nothing is saved."""
+    inst = _import_institution(db, actor, institution_id)
+    results = _checked_import(db, file)
+    invalid = sum(1 for r in results if r["errors"])
+    return {
+        "institution": {"id": inst.id, "name": inst.name, "code": inst.code},
+        "total": len(results),
+        "valid": len(results) - invalid,
+        "invalid": invalid,
+        "rows": results,
+    }
+
+
+@router.post("/deposits/import/confirm", status_code=201)
+def confirm_import(
+    file: UploadFile = File(...),
+    institution_id: Optional[int] = Form(None),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(require("INSTITUTION_USER")),
+):
+    """Save every row, but only if the whole file is valid. Otherwise nothing is saved."""
+    inst = _import_institution(db, actor, institution_id)
+    results = _checked_import(db, file)
+    invalid = [r for r in results if r["errors"]]
+    if invalid:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{len(invalid)} row(s) need fixing before the import can run. Nothing was saved.",
+        )
+
+    created_ids = []
+    for result in results:
+        row = result["data"]
+        dep = Deposit(
+            institution_id=inst.id,
+            reference_no=row["reference_no"],
+            bank_name=row["bank_name"],
+            amount=Decimal(row["amount"]),
+            issue_date=date.fromisoformat(row["issue_date"]),
+            maturity_date=date.fromisoformat(row["maturity_date"]),
+            status="SUBMITTED",
+        )
+        db.add(dep)
+        db.flush()
+        audit(db, "deposit", dep.id, "CREATED", actor.name, f"imported from {file.filename}: ref {dep.reference_no}, amount {dep.amount}")
+        trace_service.record_lifecycle_event(
+            db,
+            dep.id,
+            "CREATED_SUBMITTED",
+            actor.name,
+            f"FDR imported from file: Ref {dep.reference_no}, Amount ₹{dep.amount:,.2f}",
+            {"bank": dep.bank_name, "issue_date": str(dep.issue_date), "maturity_date": str(dep.maturity_date)},
+            actor.role,
+        )
+        created_ids.append(dep.id)
+    db.commit()
+    return {"created": len(created_ids), "ids": created_ids}
 
 
 @router.get("/deposits", response_model=DepositPage)
@@ -206,43 +316,87 @@ def verify_deposit(
     return dep
 
 
-@router.post("/deposits/{deposit_id}/renew", status_code=201, response_model=DepositOut)
-def renew_deposit(
+@router.post("/deposits/{deposit_id}/renew", status_code=201, response_model=RenewalOut)
+def request_renewal(
     deposit_id: int,
     body: RenewIn,
     db: Session = Depends(get_db),
     actor: Actor = Depends(require("INSTITUTION_USER")),
 ):
+    """Propose a replacement FDR. The old FDR stays as it is until an approving authority approves."""
     old = get_deposit_or_404(db, deposit_id, actor)
     if old.status not in RENEWABLE:
         raise HTTPException(status_code=409, detail=f"Cannot renew a deposit in status {old.status}")
     if body.institution_id != old.institution_id:
         raise HTTPException(status_code=400, detail="Renewal must belong to the same institution")
     ensure_reference_free(db, body.reference_no)
+    pending = db.scalar(
+        select(RenewalRequest.id).where(RenewalRequest.old_deposit_id == old.id, RenewalRequest.status == "PENDING")
+    )
+    if pending is not None:
+        raise HTTPException(status_code=409, detail="A renewal request is already waiting for approval")
 
-    new = Deposit(**body.model_dump(), status="SUBMITTED", previous_deposit_id=old.id)
+    rr = RenewalRequest(
+        old_deposit_id=old.id,
+        status="PENDING",
+        new_reference_no=body.reference_no,
+        new_bank_name=body.bank_name,
+        new_amount=body.amount,
+        new_issue_date=body.issue_date,
+        new_maturity_date=body.maturity_date,
+        requested_by=actor.name,
+    )
+    db.add(rr)
+    db.flush()
+    audit(db, "deposit", old.id, "RENEWAL_REQUESTED", actor.name, f"request {rr.id} for {rr.new_reference_no}")
+    trace_service.record_lifecycle_event(
+        db,
+        old.id,
+        "RENEWAL_REQUESTED",
+        actor.name,
+        f"Renewal requested with FDR {rr.new_reference_no}. Waiting for approval.",
+        {"request_id": rr.id, "new_ref": rr.new_reference_no},
+        actor.role,
+    )
+    db.commit()
+    db.refresh(rr)
+    return rr
+
+
+def _complete_renewal(db: Session, old: Deposit, rr: RenewalRequest, actor_name: str, actor_role: str) -> Deposit:
+    new = Deposit(
+        institution_id=old.institution_id,
+        reference_no=rr.new_reference_no,
+        bank_name=rr.new_bank_name,
+        amount=rr.new_amount,
+        issue_date=rr.new_issue_date,
+        maturity_date=rr.new_maturity_date,
+        status="SUBMITTED",
+        previous_deposit_id=old.id,
+    )
     db.add(new)
     db.flush()
     old.status = "RENEWED"
-    audit(db, "deposit", old.id, "RENEWED", actor.name, f"replaced by {new.reference_no}")
-    audit(db, "deposit", new.id, "CREATED", actor.name, f"renewal of {old.reference_no}")
+    rr.created_deposit_id = new.id
+    audit(db, "deposit", old.id, "RENEWED", actor_name, f"replaced by {new.reference_no}")
+    audit(db, "deposit", new.id, "CREATED", actor_name, f"renewal of {old.reference_no}")
     trace_service.record_lifecycle_event(
         db,
         old.id,
         "SUPERSEDED_BY_RENEWAL",
-        actor.name,
+        actor_name,
         f"FDR renewed/replaced by successor FDR #{new.id} ({new.reference_no})",
         {"new_id": new.id, "new_ref": new.reference_no},
-        actor.role,
+        actor_role,
     )
     trace_service.record_lifecycle_event(
         db,
         new.id,
         "RENEWAL_RECORDED",
-        actor.name,
+        actor_name,
         f"FDR created as renewal of predecessor FDR #{old.id} ({old.reference_no})",
         {"old_id": old.id, "old_ref": old.reference_no},
-        actor.role,
+        actor_role,
     )
     try:
         trace_service.add_lineage_relation(
@@ -250,14 +404,72 @@ def renew_deposit(
             old.id,
             new.id,
             "RENEWAL",
-            actor.name,
+            actor_name,
             {"renewal_amount": float(new.amount)},
         )
     except Exception:
         pass
-    db.commit()
-    db.refresh(new)
     return new
+
+
+@router.get("/renewal-requests", response_model=list[RenewalOut])
+def list_renewal_requests(
+    status: str = Query("PENDING"),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_actor),
+):
+    query = (
+        select(RenewalRequest)
+        .join(Deposit, Deposit.id == RenewalRequest.old_deposit_id)
+        .where(RenewalRequest.status == status)
+    )
+    if actor.role == "INSTITUTION_USER":
+        query = query.where(Deposit.institution_id == actor.institution_id)
+    return db.scalars(query.order_by(RenewalRequest.id)).all()
+
+
+@router.patch("/renewal-requests/{request_id}", response_model=RenewalOut)
+def decide_renewal(
+    request_id: int,
+    body: RenewalDecision,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(require("APPROVING_AUTHORITY")),
+):
+    rr = db.get(RenewalRequest, request_id)
+    if rr is None:
+        raise HTTPException(status_code=404, detail="Renewal request not found")
+    if rr.status != "PENDING":
+        raise HTTPException(status_code=409, detail=f"Renewal request already {rr.status}")
+    old = db.get(Deposit, rr.old_deposit_id)
+
+    if body.approve:
+        if old.status not in RENEWABLE:
+            raise HTTPException(status_code=409, detail=f"The FDR is now {old.status} and can no longer be renewed")
+        ensure_reference_free(db, rr.new_reference_no)
+        rr.status = "APPROVED"
+        rr.decided_by = actor.name
+        rr.remarks = body.remarks
+        _complete_renewal(db, old, rr, actor.name, actor.role)
+        action = "RENEWAL_APPROVED"
+    else:
+        rr.status = "REJECTED"
+        rr.decided_by = actor.name
+        rr.remarks = body.remarks
+        action = "RENEWAL_REJECTED"
+
+    audit(db, "deposit", old.id, action, actor.name, body.remarks)
+    trace_service.record_lifecycle_event(
+        db,
+        old.id,
+        action,
+        actor.name,
+        f"Renewal decision: {'Approved' if body.approve else 'Rejected'}. Remarks: {body.remarks}",
+        {"approve": body.approve, "remarks": body.remarks, "request_id": rr.id},
+        actor.role,
+    )
+    db.commit()
+    db.refresh(rr)
+    return rr
 
 
 # ---- Reading documents and suggesting fields ------------------------------
@@ -285,6 +497,18 @@ def extract_fdr_fields(
     return extract.extract_fdr(data, content_type)
 
 
+DOC_COMPARE_FIELDS = ("reference_no", "bank_name", "amount", "issue_date", "maturity_date")
+
+
+def _values_from_file(data: bytes, content_type: str) -> dict:
+    """Values read from a document, kept with its version. Empty when the file cannot be read."""
+    try:
+        fields = extract.extract_fdr(data, content_type)["fields"]
+    except Exception:
+        return {}
+    return {key: value for key, value in fields.items() if value}
+
+
 @router.post("/deposits/{deposit_id}/documents", status_code=201, response_model=DocumentOut)
 def upload_document(
     deposit_id: int,
@@ -304,9 +528,12 @@ def upload_document(
         storage_key=key,
         uploaded_by=actor.name,
         uploaded_at=utcnow(),
+        version=1,
+        extracted_json=json.dumps(_values_from_file(data, content_type)),
     )
     db.add(doc)
     db.flush()
+    doc.series_id = doc.id
     audit(db, "deposit", dep.id, "DOCUMENT_UPLOADED", actor.name, doc.filename)
     trace_service.record_lifecycle_event(
         db,
@@ -322,10 +549,175 @@ def upload_document(
     return doc
 
 
+MAX_BULK_DOCUMENTS = 50
+
+
+@router.post("/documents/bulk")
+def bulk_upload_documents(
+    files: list[UploadFile] = File(...),
+    deposit_id: Optional[int] = Form(None),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(require("INSTITUTION_USER", "REGULATOR_OFFICER")),
+):
+    """Attach many files at once. Each file goes to the FDR whose number equals its file name
+    (without the extension), or to the FDR chosen in deposit_id when that is given."""
+    if len(files) > MAX_BULK_DOCUMENTS:
+        raise HTTPException(status_code=400, detail=f"Upload at most {MAX_BULK_DOCUMENTS} files at a time")
+
+    chosen = get_deposit_or_404(db, deposit_id, actor) if deposit_id is not None else None
+    stems = {Path(f.filename or "upload").stem.strip().lower() for f in files}
+    by_ref: dict[str, Deposit] = {}
+    if chosen is None and stems:
+        matches = db.scalars(scope_deposits(select(Deposit), actor).where(Deposit.reference_hash.in_([fdr_number_hash(s) for s in stems])))
+        by_ref = {d.reference_no.strip().lower(): d for d in matches}
+
+    results = []
+    for upload in files:
+        name = Path(upload.filename or "upload").name[:255]
+        dep = chosen or by_ref.get(Path(name).stem.strip().lower())
+        if dep is None:
+            results.append({"filename": name, "status": "unmatched", "reason": "No FDR has this number. Rename the file to the FDR number, or choose one FDR for all files."})
+            continue
+        try:
+            data, content_type = _read_upload(upload)
+        except HTTPException as exc:
+            results.append({"filename": name, "status": "rejected", "reason": str(exc.detail)})
+            continue
+
+        key = f"{uuid.uuid4().hex}{ALLOWED_UPLOADS[content_type]}"
+        storage.save(key, data)
+        doc = Document(
+            deposit_id=dep.id,
+            filename=name,
+            content_type=content_type,
+            size_bytes=len(data),
+            storage_key=key,
+            uploaded_by=actor.name,
+            uploaded_at=utcnow(),
+            version=1,
+            extracted_json=json.dumps(_values_from_file(data, content_type)),
+        )
+        db.add(doc)
+        db.flush()
+        doc.series_id = doc.id
+        audit(db, "deposit", dep.id, "DOCUMENT_UPLOADED", actor.name, f"bulk: {doc.filename}")
+        trace_service.record_lifecycle_event(
+            db,
+            dep.id,
+            "DOCUMENT_UPLOADED",
+            actor.name,
+            f"Document uploaded in bulk: {doc.filename}",
+            {"document_id": doc.id, "size_bytes": doc.size_bytes, "content_type": doc.content_type},
+            actor.role,
+        )
+        results.append({"filename": name, "status": "attached", "deposit_id": dep.id, "document_id": doc.id})
+
+    db.commit()
+    counts = {status: sum(1 for r in results if r["status"] == status) for status in ("attached", "unmatched", "rejected")}
+    return {**counts, "results": results}
+
+
 @router.get("/deposits/{deposit_id}/documents", response_model=list[DocumentOut])
 def list_documents(deposit_id: int, db: Session = Depends(get_db), actor: Actor = Depends(get_actor)):
     get_deposit_or_404(db, deposit_id, actor)
     return db.scalars(select(Document).where(Document.deposit_id == deposit_id).order_by(Document.id)).all()
+
+
+def _series_query(doc: Document):
+    series = doc.series_id or doc.id
+    return select(Document).where(
+        Document.deposit_id == doc.deposit_id,
+        or_(Document.series_id == series, Document.id == series),
+    )
+
+
+@router.post("/deposits/{deposit_id}/documents/{document_id}/versions", status_code=201, response_model=DocumentOut)
+def upload_new_version(
+    deposit_id: int,
+    document_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(require("INSTITUTION_USER", "REGULATOR_OFFICER")),
+):
+    """Adds a new version of a document. Earlier versions are kept, never overwritten."""
+    dep = get_deposit_or_404(db, deposit_id, actor)
+    original = db.get(Document, document_id)
+    if original is None or original.deposit_id != dep.id:
+        raise HTTPException(status_code=404, detail="Document not found")
+    latest = db.scalar(select(func.max(Document.version)).where(Document.id.in_(_series_query(original).with_only_columns(Document.id)))) or 1
+    data, content_type = _read_upload(file)
+    key = f"{uuid.uuid4().hex}{ALLOWED_UPLOADS[content_type]}"
+    storage.save(key, data)
+    doc = Document(
+        deposit_id=dep.id,
+        filename=Path(file.filename or "upload").name[:255],
+        content_type=content_type,
+        size_bytes=len(data),
+        storage_key=key,
+        uploaded_by=actor.name,
+        uploaded_at=utcnow(),
+        series_id=original.series_id or original.id,
+        version=latest + 1,
+        extracted_json=json.dumps(_values_from_file(data, content_type)),
+    )
+    db.add(doc)
+    db.flush()
+    audit(db, "deposit", dep.id, "DOCUMENT_VERSION_ADDED", actor.name, f"{doc.filename} v{doc.version}")
+    trace_service.record_lifecycle_event(
+        db,
+        dep.id,
+        "DOCUMENT_VERSION_ADDED",
+        actor.name,
+        f"New version {doc.version} uploaded: {doc.filename}",
+        {"document_id": doc.id, "version": doc.version, "series_id": doc.series_id},
+        actor.role,
+    )
+    db.commit()
+    db.refresh(doc)
+    return doc
+
+
+@router.get("/documents/{document_id}/versions", response_model=list[DocumentOut])
+def list_versions(document_id: int, db: Session = Depends(get_db), actor: Actor = Depends(get_actor)):
+    doc = db.get(Document, document_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    get_deposit_or_404(db, doc.deposit_id, actor)
+    return db.scalars(_series_query(doc).order_by(Document.version, Document.id)).all()
+
+
+@router.get("/documents/compare")
+def compare_documents(
+    a: int = Query(...),
+    b: int = Query(...),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_actor),
+):
+    """Compares the values read from two documents of the same FDR. Both files can then be viewed side by side."""
+    left = db.get(Document, a)
+    right = db.get(Document, b)
+    if left is None or right is None or left.deposit_id != right.deposit_id:
+        raise HTTPException(status_code=404, detail="Document not found")
+    get_deposit_or_404(db, left.deposit_id, actor)
+
+    def summary(doc: Document) -> dict:
+        return {
+            "id": doc.id,
+            "version": doc.version,
+            "filename": doc.filename,
+            "uploaded_by": doc.uploaded_by,
+            "uploaded_at": doc.uploaded_at.isoformat(),
+            "values": json.loads(doc.extracted_json or "{}"),
+        }
+
+    left_values = json.loads(left.extracted_json or "{}")
+    right_values = json.loads(right.extracted_json or "{}")
+    changes = [
+        {"field": field, "old": left_values.get(field), "new": right_values.get(field)}
+        for field in DOC_COMPARE_FIELDS
+        if left_values.get(field) != right_values.get(field)
+    ]
+    return {"a": summary(left), "b": summary(right), "changes": changes, "identical_values": not changes}
 
 
 @router.get("/documents/{document_id}/download")

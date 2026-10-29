@@ -2,7 +2,9 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, event
+
+from .crypto import EncryptedText, bank_hash, fdr_number_hash
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -29,15 +31,18 @@ class Deposit(Base):
     institution_id: Mapped[int] = mapped_column(ForeignKey("institutions.id"), index=True)
 
     # Values submitted by the institution
-    reference_no: Mapped[str] = mapped_column(String(100), unique=True)
-    bank_name: Mapped[str] = mapped_column(String(255))
+    # The FDR number and bank name are encrypted. The *_hash columns allow exact lookups.
+    reference_no: Mapped[str] = mapped_column(EncryptedText())
+    reference_hash: Mapped[Optional[str]] = mapped_column(String(64), unique=True, index=True, nullable=True)
+    bank_name: Mapped[str] = mapped_column(EncryptedText())
+    bank_hash: Mapped[Optional[str]] = mapped_column(String(64), index=True, nullable=True)
     amount: Mapped[Decimal] = mapped_column(Numeric(14, 2))
     issue_date: Mapped[date] = mapped_column(Date)
     maturity_date: Mapped[date] = mapped_column(Date, index=True)
 
     # Values confirmed by the bank or the officer. NULL means not checked yet.
-    confirmed_reference_no: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    confirmed_bank_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    confirmed_reference_no: Mapped[Optional[str]] = mapped_column(EncryptedText(), nullable=True)
+    confirmed_bank_name: Mapped[Optional[str]] = mapped_column(EncryptedText(), nullable=True)
     confirmed_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
     confirmed_issue_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     confirmed_maturity_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
@@ -63,6 +68,9 @@ class Document(Base):
     storage_key: Mapped[str] = mapped_column(String(100), unique=True)
     uploaded_by: Mapped[str] = mapped_column(String(100))
     uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    series_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)  # id of the first version
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    extracted_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # values read from this file, as JSON
 
 
 class Notification(Base):
@@ -88,6 +96,33 @@ class ReleaseRequest(Base):
     requested_by: Mapped[str] = mapped_column(String(100))
     decided_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     remarks: Mapped[str] = mapped_column(Text, default="")
+
+
+@event.listens_for(Deposit, "before_insert")
+@event.listens_for(Deposit, "before_update")
+def _fill_lookup_hashes(mapper, connection, target) -> None:
+    target.reference_hash = fdr_number_hash(target.reference_no) if target.reference_no else None
+    target.bank_hash = bank_hash(target.bank_name) if target.bank_name else None
+
+
+class RenewalRequest(Base):
+    """A proposed replacement FDR. It takes effect only when an approving authority approves it."""
+
+    __tablename__ = "renewal_requests"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    old_deposit_id: Mapped[int] = mapped_column(ForeignKey("deposits.id"), index=True)
+    status: Mapped[str] = mapped_column(String(16))  # PENDING / APPROVED / REJECTED
+    new_reference_no: Mapped[str] = mapped_column(EncryptedText())
+    new_bank_name: Mapped[str] = mapped_column(EncryptedText())
+    new_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    new_issue_date: Mapped[date] = mapped_column(Date)
+    new_maturity_date: Mapped[date] = mapped_column(Date)
+    requested_by: Mapped[str] = mapped_column(String(100))
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    decided_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    remarks: Mapped[str] = mapped_column(Text, default="")
+    created_deposit_id: Mapped[Optional[int]] = mapped_column(ForeignKey("deposits.id"), nullable=True)
 
 
 class AuditLog(Base):

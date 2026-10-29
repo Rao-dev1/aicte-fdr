@@ -113,6 +113,28 @@ class RenewIn(DepositCreate):
     pass
 
 
+class RenewalOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    old_deposit_id: int
+    status: str
+    new_reference_no: str
+    new_bank_name: str
+    new_amount: Decimal
+    new_issue_date: date
+    new_maturity_date: date
+    requested_by: str
+    decided_by: Optional[str] = None
+    remarks: str = ""
+    created_deposit_id: Optional[int] = None
+
+
+class RenewalDecision(BaseModel):
+    approve: bool
+    remarks: str = ""
+
+
 class ReleaseOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -150,6 +172,8 @@ class DocumentOut(BaseModel):
     size_bytes: int
     uploaded_by: str
     uploaded_at: datetime
+    series_id: Optional[int] = None
+    version: int = 1
 
 
 class NotificationOut(BaseModel):

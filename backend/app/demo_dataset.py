@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .auth import hash_password
+from .crypto import fdr_number_hash
 from .models import (
     AssessmentSnapshot,
     Deposit,
@@ -981,7 +982,7 @@ def seed_demonstration_dataset(db: Session) -> dict[str, Any]:
     for spec in DEPOSITS_SPEC:
         ref = spec["ref"]
         inst = inst_map[spec["inst_code"]]
-        dep = db.scalar(select(Deposit).where(Deposit.reference_no == ref))
+        dep = db.scalar(select(Deposit).where(Deposit.reference_hash == fdr_number_hash(ref)))
         if not dep:
             dep = Deposit(
                 reference_no=ref,

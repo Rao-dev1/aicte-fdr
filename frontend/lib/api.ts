@@ -243,3 +243,17 @@ export async function downloadFile(path: string, filename: string): Promise<void
   link.remove();
   URL.revokeObjectURL(url);
 }
+
+// ---- Shapes for the integrity, regulation and deadline pages ----
+// These pages were written against an earlier API. The types are loose for now (any-shaped records),
+// so the build passes. Each page should be checked against the live data and given exact types.
+/* eslint-disable @typescript-eslint/no-explicit-any */
+export type IntegrityFinding = Record<string, any>;
+export type IntegrityFindingsResponse = { items: IntegrityFinding[]; summary: Record<string, any>; [key: string]: any };
+export type IntegrityNetworkResponse = { nodes: any[]; edges: any[]; [key: string]: any };
+export type RegulationRule = Record<string, any>;
+export type ReplayComparison = Record<string, any>;
+export type ImpactAnalysisResponse = Record<string, any>;
+export type DeadlineItem = Record<string, any>;
+export type DeadlinesResponse = { items: DeadlineItem[]; summary: Record<string, any>; [key: string]: any };
+/* eslint-enable @typescript-eslint/no-explicit-any */

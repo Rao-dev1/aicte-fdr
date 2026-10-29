@@ -3,11 +3,8 @@ import "./globals.css";
 
 // System fonts are used so the build does not depend on Google Fonts being reachable.
 export const metadata: Metadata = {
-  title: "AICTE Security Deposit / FDR Management Portal - Govt. of India",
-  description: "AICTE Security Deposit and Fixed Deposit Receipt (FDR) lifecycle management, verification, and statutory release.",
-  icons: {
-    icon: "/assets/aicte_official_logo.png",
-  },
+  title: "AICTE FDR Portal",
+  description: "Security deposit and FDR management for AICTE approval processes",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

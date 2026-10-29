@@ -305,7 +305,7 @@ export default function IntegrityPage() {
                         </td>
                         <td className="px-4 py-3.5 text-xs">
                           <div className="flex flex-wrap gap-1">
-                            {f.related_deposit_ids.map((id) => (
+                            {f.related_deposit_ids.map((id: any) => (
                               <Link
                                 key={id}
                                 href={`/deposits/${id}`}
@@ -466,7 +466,7 @@ export default function IntegrityPage() {
               <div>
                 <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Related Deposits</label>
                 <div className="mt-1 flex flex-wrap gap-2">
-                  {activeFinding.related_deposit_ids.map((id) => (
+                  {activeFinding.related_deposit_ids.map((id: any) => (
                     <Link
                       key={id}
                       href={`/deposits/${id}`}
@@ -484,7 +484,7 @@ export default function IntegrityPage() {
                 <div>
                   <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Resolution History</label>
                   <div className="mt-1 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                    {activeFinding.actions.map((act) => (
+                    {activeFinding.actions.map((act: any) => (
                       <div key={act.id} className="border-b border-slate-200 pb-2 text-xs last:border-0 last:pb-0">
                         <div className="flex justify-between text-slate-500">
                           <span className="font-semibold text-slate-800">{act.actor} ({act.action})</span>

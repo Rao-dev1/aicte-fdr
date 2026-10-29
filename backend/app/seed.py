@@ -17,7 +17,7 @@ DEMO_USERS = [
     ("admin", "Portal Admin", "ADMIN", None, "Admin@12345"),
     ("officer1", "AICTE Regulation Officer", "REGULATOR_OFFICER", None, "Officer@12345"),
     ("approver1", "Approving Authority", "APPROVING_AUTHORITY", None, "Approver@12345"),
-    ("institution1", "Deccan Institute Accounts", "INSTITUTION_USER", "DIT-PUNE", "Institute@12345"),
+    ("institution1", "Vishwakarma Institute Accounts", "INSTITUTION_USER", "DIT-PUNE", "Institute@12345"),
     ("institution2", "Western Valley Accounts", "INSTITUTION_USER", "WVCE-NASHIK", "Institute@12345"),
     ("institution3", "Sahyadri Institute Accounts", "INSTITUTION_USER", "SIAS-KOLHAPUR", "Institute@12345"),
     ("institution4", "Coastal Technical Accounts", "INSTITUTION_USER", "CTU-GOA", "Institute@12345"),

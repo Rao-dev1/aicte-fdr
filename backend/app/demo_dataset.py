@@ -51,7 +51,7 @@ DEMO_TAG = "DEMO DATA — NOT VERIFIED BANK OR INSTITUTION RECORDS"
 
 # 10 Fictional Institutions
 INSTITUTIONS_DATA = [
-    {"code": "DIT-PUNE", "name": "Deccan Institute of Technology, Pune"},
+    {"code": "DIT-PUNE", "name": "Vishwakarma Institute of Technology, Pune"},
     {"code": "WVCE-NASHIK", "name": "Western Valley College of Engineering, Nashik"},
     {"code": "SIAS-KOLHAPUR", "name": "Sahyadri Institute of Applied Sciences, Kolhapur"},
     {"code": "CTU-GOA", "name": "Coastal Technical University, Goa"},
@@ -90,7 +90,7 @@ def seed_institutions(db: Session) -> dict[str, Institution]:
     inst1 = db.get(Institution, 1)
     if inst1:
         inst1.code = "DIT-PUNE"
-        inst1.name = "Deccan Institute of Technology, Pune"
+        inst1.name = "Vishwakarma Institute of Technology, Pune"
         db.flush()
         inst_map["DIT-PUNE"] = inst1
 
@@ -118,7 +118,7 @@ def seed_users(db: Session, inst_map: dict[str, Institution]) -> None:
         ("admin", "Portal Admin", "ADMIN", None, "Admin@12345"),
         ("officer1", "AICTE Regulation Officer", "REGULATOR_OFFICER", None, "Officer@12345"),
         ("approver1", "Approving Authority", "APPROVING_AUTHORITY", None, "Approver@12345"),
-        ("institution1", "Deccan Institute Accounts", "INSTITUTION_USER", "DIT-PUNE", "Institute@12345"),
+        ("institution1", "Vishwakarma Institute Accounts", "INSTITUTION_USER", "DIT-PUNE", "Institute@12345"),
         ("institution2", "Western Valley Accounts", "INSTITUTION_USER", "WVCE-NASHIK", "Institute@12345"),
         ("institution3", "Sahyadri Institute Accounts", "INSTITUTION_USER", "SIAS-KOLHAPUR", "Institute@12345"),
         ("institution4", "Coastal Technical Accounts", "INSTITUTION_USER", "CTU-GOA", "Institute@12345"),

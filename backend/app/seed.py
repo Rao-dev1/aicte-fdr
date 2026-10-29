@@ -1,9 +1,12 @@
-"""Demo accounts for local testing. Runs only when no users exist yet. Change or delete these before any real use."""
+"""Demo accounts and connected demonstration dataset for local testing.
+Runs only when no users exist yet or when explicitly invoked.
+"""
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .auth import hash_password
+from .demo_dataset import seed_demonstration_dataset
 from .models import Institution, User
 
 DEMO_USERS = [
@@ -11,11 +14,14 @@ DEMO_USERS = [
     ("admin", "Portal Admin", "ADMIN", None, "Admin@12345"),
     ("officer1", "AICTE Regulation Officer", "REGULATOR_OFFICER", None, "Officer@12345"),
     ("approver1", "Approving Authority", "APPROVING_AUTHORITY", None, "Approver@12345"),
-    ("institution1", "VIT Pune Accounts", "INSTITUTION_USER", "VIT-PUNE", "Institute@12345"),
+    ("institution1", "Deccan Institute Accounts", "INSTITUTION_USER", "DIT-PUNE", "Institute@12345"),
+    ("institution2", "Western Valley Accounts", "INSTITUTION_USER", "WVCE-NASHIK", "Institute@12345"),
+    ("institution3", "Sahyadri Institute Accounts", "INSTITUTION_USER", "SIAS-KOLHAPUR", "Institute@12345"),
+    ("institution4", "Coastal Technical Accounts", "INSTITUTION_USER", "CTU-GOA", "Institute@12345"),
 ]
 
 
-def seed_demo_users(db: Session) -> int:
+def seed_demo_users(db: Session, seed_dataset: bool = True) -> int:
     created = 0
     for username, full_name, role, code, password in DEMO_USERS:
         uname = username.strip().lower()
@@ -27,7 +33,7 @@ def seed_demo_users(db: Session) -> int:
         if code:
             inst = db.scalar(select(Institution).where(Institution.code == code))
             if inst is None:
-                inst = Institution(name="Vishwakarma Institute of Technology, Pune", code=code)
+                inst = Institution(name=f"{code} Institution", code=code)
                 db.add(inst)
                 db.flush()
             institution_id = inst.id
@@ -45,4 +51,17 @@ def seed_demo_users(db: Session) -> int:
         )
         created += 1
     db.commit()
+
+    # Seed demonstration dataset if enabled (disabled during unit tests via SEED_DEMO=0)
+    import os
+    if seed_dataset and os.getenv("SEED_DEMO", "1") == "1":
+        seed_demonstration_dataset(db)
     return created
+
+
+if __name__ == "__main__":
+    from .db import SessionLocal
+
+    with SessionLocal() as session:
+        seed_demo_users(session)
+        print("Demo users and dataset verified.")

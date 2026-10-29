@@ -42,6 +42,7 @@ def record_lifecycle_event(
     summary: str,
     details: Optional[dict[str, Any]] = None,
     actor_role: Optional[str] = None,
+    created_at: Optional[datetime] = None,
 ) -> FDRLifecycleEvent:
     """Appends an immutable lifecycle event to the hash-chained journal."""
     details_str = json.dumps(details or {}, sort_keys=True, default=str)
@@ -54,7 +55,7 @@ def record_lifecycle_event(
     ).first()
 
     prev_hash = last_event.event_hash if last_event else "GENESIS"
-    now_ts = utcnow()
+    now_ts = created_at or utcnow()
     event_hash = _compute_hash(prev_hash, deposit_id, event_type, actor, summary, details_str, _format_timestamp(now_ts))
 
     event = FDRLifecycleEvent(
@@ -148,6 +149,7 @@ def add_lineage_relation(
     relation_type: str,
     actor: str,
     metadata: Optional[dict[str, Any]] = None,
+    created_at: Optional[datetime] = None,
 ) -> FDRLineageRelation:
     """Creates a validated lineage relation between two FDR records."""
     if relation_type not in RELATION_TYPES:
@@ -178,6 +180,7 @@ def add_lineage_relation(
             f"Circular lineage detected: Linking FDR #{source_id} to FDR #{target_id} would create an invalid loop."
         )
 
+    ts = created_at or utcnow()
     meta_str = json.dumps(metadata or {}, sort_keys=True, default=str)
     rel = FDRLineageRelation(
         source_deposit_id=source_id,
@@ -185,7 +188,7 @@ def add_lineage_relation(
         relation_type=relation_type,
         metadata_json=meta_str,
         actor=actor,
-        created_at=utcnow(),
+        created_at=ts,
     )
     db.add(rel)
 
@@ -197,6 +200,7 @@ def add_lineage_relation(
         actor,
         f"Linked to FDR #{target_id} ({target_dep.reference_no}) as {relation_type}",
         {"target_deposit_id": target_id, "relation_type": relation_type},
+        created_at=ts,
     )
     record_lifecycle_event(
         db,
@@ -205,6 +209,7 @@ def add_lineage_relation(
         actor,
         f"Linked from predecessor FDR #{source_id} ({source_dep.reference_no}) as {relation_type}",
         {"source_deposit_id": source_id, "relation_type": relation_type},
+        created_at=ts,
     )
 
     return rel

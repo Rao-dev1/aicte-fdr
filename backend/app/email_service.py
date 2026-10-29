@@ -11,11 +11,15 @@ from .models import EmailLog, User
 SENDGRID_URL = "https://api.sendgrid.com/v3/mail/send"
 
 
-def queue_for_role(db: Session, role: str, subject: str, body: str) -> int:
-    """Queue one email per active user with this role who has an email address."""
-    users = db.scalars(
-        select(User).where(User.role == role, User.is_active.is_(True), User.email.is_not(None))
-    ).all()
+def queue_for_role(db: Session, role: str, subject: str, body: str, institution_id: int | None = None) -> int:
+    """Queue one email per active user with this role who has an email address.
+
+    Institution users only receive emails about their own institution's FDRs (pass institution_id).
+    """
+    query = select(User).where(User.role == role, User.is_active.is_(True), User.email.is_not(None))
+    if role == "INSTITUTION_USER":
+        query = query.where(User.institution_id == institution_id)
+    users = db.scalars(query).all()
     for user in users:
         db.add(EmailLog(to_address=user.email, subject=subject, body=body, status="QUEUED"))
     db.flush()

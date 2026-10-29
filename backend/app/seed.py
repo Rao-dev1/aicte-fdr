@@ -2,12 +2,15 @@
 Runs only when no users exist yet or when explicitly invoked.
 """
 
+import os
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .auth import hash_password
 from .demo_dataset import seed_demonstration_dataset
 from .models import Institution, User
+from .sms_service import normalize_phone
 
 DEMO_USERS = [
     # username, full name, role, institution code (or None), password
@@ -23,6 +26,8 @@ DEMO_USERS = [
 
 def seed_demo_users(db: Session, seed_dataset: bool = True) -> int:
     created = 0
+    # Optional: your own mobile number, so demo accounts receive SMS alerts. Never hardcode real numbers here.
+    demo_phone = normalize_phone(os.getenv("DEMO_PHONE"))
     for username, full_name, role, code, password in DEMO_USERS:
         uname = username.strip().lower()
         existing = db.scalar(select(User).where(User.username == uname))
@@ -45,6 +50,7 @@ def seed_demo_users(db: Session, seed_dataset: bool = True) -> int:
                 email=f"{uname}@example.com",
                 role=role,
                 institution_id=institution_id,
+                phone=demo_phone if role != "ADMIN" else None,
                 password_hash=hash_password(password),
                 is_active=True,
             )
@@ -53,7 +59,6 @@ def seed_demo_users(db: Session, seed_dataset: bool = True) -> int:
     db.commit()
 
     # Seed demonstration dataset if enabled (disabled during unit tests via SEED_DEMO=0)
-    import os
     if seed_dataset and os.getenv("SEED_DEMO", "1") == "1":
         seed_demonstration_dataset(db)
     return created

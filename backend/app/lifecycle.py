@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .email_service import deliver_queued, queue_for_role
+from .sms_service import deliver_queued_sms, queue_sms_for_role
 from .models import AuditLog, Deposit, Notification
 
 STATUSES = [
@@ -56,7 +57,7 @@ def mismatched_fields(dep: Deposit) -> list[str]:
     return mismatches
 
 
-def _notify_once(db: Session, dep: Deposit, kind: str, role: str, message: str) -> int:
+def _notify_once(db: Session, dep: Deposit, kind: str, role: str, message: str, sms_text: str = "") -> int:
     """Create a notification unless one of this kind already exists for the deposit. Returns 1 if created."""
     exists = db.scalar(
         select(Notification.id).where(Notification.deposit_id == dep.id, Notification.kind == kind)
@@ -64,7 +65,9 @@ def _notify_once(db: Session, dep: Deposit, kind: str, role: str, message: str) 
     if exists is not None:
         return 0
     db.add(Notification(deposit_id=dep.id, kind=kind, role=role, message=message))
-    queue_for_role(db, role, f"FDR portal: {kind.replace('_', ' ').lower()}", message)
+    queue_for_role(db, role, f"FDR portal: {kind.replace('_', ' ').lower()}", message, dep.institution_id)
+    if sms_text:
+        queue_sms_for_role(db, role, dep.reference_no, sms_text, dep.institution_id)
     return 1
 
 
@@ -80,6 +83,7 @@ def _notifications_for(db: Session, dep: Deposit, today: date) -> int:
                     f"REMINDER_{threshold}",
                     "INSTITUTION_USER",
                     f"FDR {dep.reference_no} matures in {days_left} days ({dep.effective_maturity.isoformat()}).",
+                    sms_text=f"matures in {days_left} days",
                 )
     if dep.status == "MATURED" and days_left < 0:
         created += _notify_once(
@@ -88,6 +92,7 @@ def _notifications_for(db: Session, dep: Deposit, today: date) -> int:
             "OVERDUE",
             "APPROVING_AUTHORITY",
             f"FDR {dep.reference_no} matured on {dep.effective_maturity.isoformat()} with no renewal or release.",
+            sms_text="is overdue, action needed",
         )
     return created
 
@@ -114,4 +119,5 @@ def lifecycle_sweep(db: Session, today: date) -> dict:
         notifications += _notifications_for(db, dep, today)
     db.commit()
     emails = deliver_queued(db)
-    return {"changed": changed, "notifications_created": notifications, "emails": emails}
+    sms = deliver_queued_sms(db)
+    return {"changed": changed, "notifications_created": notifications, "emails": emails, "sms": sms}

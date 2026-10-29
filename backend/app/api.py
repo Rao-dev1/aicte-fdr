@@ -14,7 +14,7 @@ from . import extract, reports, storage
 from .auth import Actor, get_actor, require
 from .db import get_db
 from .lifecycle import REMINDED, STATUSES, TRACKED, mismatched_fields
-from .models import AuditLog, Deposit, Document, EmailLog, Institution, JobRun, Notification, ReleaseRequest, utcnow
+from .models import AuditLog, Deposit, Document, EmailLog, Institution, JobRun, Notification, ReleaseRequest, SmsLog, utcnow
 from .scheduler import run_daily_check, today_ist
 from .services import deadline_service, deficiency_service, trace_service
 from .schemas import (
@@ -482,6 +482,27 @@ def list_email_log(
             "id": r.id,
             "to": r.to_address,
             "subject": r.subject,
+            "status": r.status,
+            "error": r.error,
+            "created_at": r.created_at.isoformat(),
+        }
+        for r in rows
+    ]
+
+
+@router.get("/admin/sms")
+def list_sms_log(
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(require()),
+):
+    rows = db.scalars(select(SmsLog).order_by(SmsLog.id.desc()).limit(limit)).all()
+    return [
+        {
+            "id": r.id,
+            # Masked so the admin log does not expose full phone numbers.
+            "to": f"{r.to_number[:4]}XXXXXX{r.to_number[-2:]}",
+            "message": r.message.replace("|", " "),
             "status": r.status,
             "error": r.error,
             "created_at": r.created_at.isoformat(),

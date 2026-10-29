@@ -113,6 +113,7 @@ class User(Base):
     institution_id: Mapped[Optional[int]] = mapped_column(ForeignKey("institutions.id"), nullable=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    phone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # stored as 91XXXXXXXXXX
 
 
 class EmailLog(Base):
@@ -122,6 +123,17 @@ class EmailLog(Base):
     to_address: Mapped[str] = mapped_column(String(255))
     subject: Mapped[str] = mapped_column(String(255))
     body: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16), index=True)  # QUEUED / LOGGED / SENT / FAILED
+    error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class SmsLog(Base):
+    __tablename__ = "sms_log"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    to_number: Mapped[str] = mapped_column(String(20))
+    message: Mapped[str] = mapped_column(String(100))  # "<reference>|<status text>", the two template variables
     status: Mapped[str] = mapped_column(String(16), index=True)  # QUEUED / LOGGED / SENT / FAILED
     error: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

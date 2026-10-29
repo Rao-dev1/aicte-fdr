@@ -1,13 +1,14 @@
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .auth import Actor, create_token, get_actor, hash_password, require, verify_password
 from .db import get_db
 from .models import Institution, User
+from .sms_service import normalize_phone
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -33,6 +34,17 @@ class UserCreate(BaseModel):
     password: str = Field(min_length=8, max_length=200)
     role: Literal["INSTITUTION_USER", "REGULATOR_OFFICER", "APPROVING_AUTHORITY", "ADMIN"]
     institution_id: Optional[int] = None
+    phone: Optional[str] = Field(default=None, description="Indian mobile number for SMS alerts")
+
+    @field_validator("phone")
+    @classmethod
+    def valid_phone(cls, value: Optional[str]) -> Optional[str]:
+        if value is None or not value.strip():
+            return None
+        number = normalize_phone(value)
+        if number is None:
+            raise ValueError("Enter a valid 10-digit Indian mobile number")
+        return number
 
 
 class UserOut(BaseModel):
@@ -84,6 +96,7 @@ def create_user(body: UserCreate, db: Session = Depends(get_db), actor: Actor = 
         email=body.email,
         role=body.role,
         institution_id=body.institution_id if body.role == "INSTITUTION_USER" else None,
+        phone=body.phone,
         password_hash=hash_password(body.password),
         is_active=True,
     )

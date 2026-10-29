@@ -159,15 +159,30 @@ def test_notification_can_be_marked_read(client):
     assert r.json()["is_read"] is True
 
 
-def test_reminder_emails_are_logged_for_institution_users(client):
+def test_reminder_emails_are_logged_for_the_owning_institution_only(client):
     inst = make_institution(client)
+    owner = client.post(
+        "/api/auth/users",
+        json={
+            "username": "owner1",
+            "full_name": "Owner",
+            "email": "owner1@example.com",
+            "password": "Password@123",
+            "role": "INSTITUTION_USER",
+            "institution_id": inst,
+        },
+        headers=hdr("ADMIN"),
+    )
+    assert owner.status_code == 201, owner.text
     dep = make_deposit(client, inst, maturity="2026-11-20")
     verify(client, dep["id"])
     result = sweep(date(2026, 9, 25))
     assert result["emails"]["logged"] >= 1
 
     emails = client.get("/api/admin/emails", headers=hdr("ADMIN")).json()
-    assert any(e["to"] == "institution1@example.com" and e["status"] == "LOGGED" for e in emails)
+    assert any(e["to"] == "owner1@example.com" and e["status"] == "LOGGED" for e in emails)
+    # The seeded demo user belongs to a different institution and must not be emailed about this FDR.
+    assert not any(e["to"] == "institution1@example.com" for e in emails)
 
 
 # ---- Renewal and release --------------------------------------------------

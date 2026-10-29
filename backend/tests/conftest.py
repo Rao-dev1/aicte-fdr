@@ -5,6 +5,7 @@ os.environ["DATABASE_URL"] = "sqlite:///./test_fdr.db"
 os.environ["UPLOAD_DIR"] = "./test_uploads"
 os.environ["SEED_DEMO"] = "0"  # the fixture seeds explicitly below
 os.environ["SCHEDULER_ENABLED"] = "0"  # tests start the scheduler themselves when needed
+os.environ["MSG91_AUTH_KEY"] = ""  # tests must never send real SMS; they are only logged
 os.environ["SENDGRID_API_KEY"] = ""  # tests must never send real email; emails are only logged
 os.environ["AUTH_JWT_SECRET"] = "test-only-secret-that-is-long-enough-for-sha256-0123456789"
 

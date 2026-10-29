@@ -12,6 +12,7 @@ from .api import router
 from .auth import _secret
 from .auth_routes import router as auth_router
 from .db import SessionLocal, engine
+from .migrations import ensure_user_phone_column
 from .models import Base
 from .scheduler import start_scheduler
 from .seed import seed_demo_users
@@ -23,6 +24,7 @@ async def lifespan(app: FastAPI):
     _secret()  # refuses to start without a strong AUTH_JWT_SECRET
     # Creates tables if missing.
     Base.metadata.create_all(bind=engine)
+    ensure_user_phone_column()  # adds users.phone on databases created before SMS support
     with SessionLocal() as db:
         ensure_default_regulations_seeded(db)
         # Seed demo users if SEED_DEMO=1 (default for local development)

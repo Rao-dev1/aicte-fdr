@@ -195,7 +195,8 @@ function DepositDetail() {
                 const submitted = deposit[f.submitted] as string;
                 const confirmed = deposit[f.confirmed] as string | null;
                 const mismatch = deposit.mismatch_fields.includes(f.key);
-                const format = (v: string | null) => (f.key === "amount" ? money(v) : dateOnly(v));
+                const format = (v: string | null) =>
+                  f.key === "amount" ? money(v) : f.key.endsWith("date") ? dateOnly(v) : v || "—";
                 return (
                   <tr key={f.key} className={`border-t border-slate-100 ${mismatch ? "bg-red-50" : ""}`}>
                     <td className="px-5 py-3 font-medium">{f.label}</td>

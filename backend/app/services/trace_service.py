@@ -11,7 +11,7 @@ from typing import Any, Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models import AuditLog, Deposit, FDRLifecycleEvent, FDRLineageRelation, utcnow
+from ..models import AuditLog, Deposit, FDRLifecycleEvent, FDRLineageRelation, Notification, utcnow
 
 RELATION_TYPES = {
     "ORIGINAL",
@@ -71,7 +71,40 @@ def record_lifecycle_event(
     )
     db.add(event)
     db.flush()
+    _notify_for_event(db, event)
     return event
+
+
+# Which role should see each kind of change, and a short heading for it.
+NOTIFY_ROLE = {
+    "CREATED_SUBMITTED": ("REGULATOR_OFFICER", "New FDR submitted"),
+    "DOCUMENT_UPLOADED": ("REGULATOR_OFFICER", "Document uploaded"),
+    "DOCUMENT_VERSION_ADDED": ("REGULATOR_OFFICER", "New document version"),
+    "VERIFICATION_STATUS_CHANGED": ("INSTITUTION_USER", "Verification update"),
+    "RENEWAL_REQUESTED": ("APPROVING_AUTHORITY", "Renewal awaiting approval"),
+    "RELEASE_REQUESTED": ("APPROVING_AUTHORITY", "Release awaiting approval"),
+    "RENEWAL_APPROVED": ("INSTITUTION_USER", "Renewal approved"),
+    "RENEWAL_REJECTED": ("INSTITUTION_USER", "Renewal rejected"),
+    "RELEASE_APPROVED": ("INSTITUTION_USER", "Release approved"),
+    "RELEASE_REJECTED": ("INSTITUTION_USER", "Release rejected"),
+}
+
+
+def _notify_for_event(db: Session, event: FDRLifecycleEvent) -> None:
+    """Puts a notification in the inbox of the role that needs to act on or see this change.
+    The kind includes the lifecycle event id, so every change gets its own notification."""
+    target = NOTIFY_ROLE.get(event.event_type)
+    if target is None:
+        return
+    role, heading = target
+    db.add(
+        Notification(
+            deposit_id=event.deposit_id,
+            kind=f"{event.event_type[:20]}:{event.id}",
+            role=role,
+            message=f"{heading}: {event.summary}",
+        )
+    )
 
 
 def verify_timeline_integrity(events: list[FDRLifecycleEvent]) -> dict[str, Any]:

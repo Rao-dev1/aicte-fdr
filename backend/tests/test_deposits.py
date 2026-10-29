@@ -131,7 +131,7 @@ def test_reminders_fire_once_at_60_30_and_7_days(client):
     sweep(date(2026, 11, 15))  # 5 days left
 
     notes = client.get("/api/notifications", headers=hdr("INSTITUTION_USER", inst=inst)).json()
-    kinds = sorted(n["kind"] for n in notes if n["deposit_id"] == dep["id"])
+    kinds = sorted(n["kind"] for n in notes if n["deposit_id"] == dep["id"] and n["kind"].startswith("REMINDER_"))
     assert kinds == ["REMINDER_30", "REMINDER_60", "REMINDER_7"]
 
 

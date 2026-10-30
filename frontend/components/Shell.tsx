@@ -12,13 +12,15 @@ const COMMON: NavItem[] = [
   { href: "/deposits", label: "Deposits" },
   { href: "/calendar", label: "Calendar" },
   { href: "/notifications", label: "Notifications" },
+  { href: "/regulations", label: "Regulations" },
 ];
+const OFFICER_ONLY: NavItem[] = [{ href: "/integrity", label: "Integrity" }];
 
 const NAV: Record<Role, NavItem[]> = {
   INSTITUTION_USER: [...COMMON.slice(0, 2), { href: "/deposits/new", label: "New FDR" }, { href: "/deposits/import", label: "Import FDRs" }, ...COMMON.slice(2)],
-  REGULATOR_OFFICER: COMMON,
+  REGULATOR_OFFICER: [...COMMON.slice(0, 4), ...OFFICER_ONLY, COMMON[4]],
   APPROVING_AUTHORITY: [...COMMON.slice(0, 2), { href: "/approvals", label: "Approvals" }, ...COMMON.slice(2)],
-  ADMIN: [...COMMON.slice(0, 2), { href: "/deposits/new", label: "New FDR" }, { href: "/deposits/import", label: "Import FDRs" }, { href: "/approvals", label: "Approvals" }, ...COMMON.slice(2)],
+  ADMIN: [...COMMON.slice(0, 2), { href: "/deposits/new", label: "New FDR" }, { href: "/deposits/import", label: "Import FDRs" }, { href: "/approvals", label: "Approvals" }, ...COMMON.slice(2, 4), ...OFFICER_ONLY, COMMON[4]],
 };
 
 export function Shell({ children }: { children: ReactNode }) {

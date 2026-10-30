@@ -387,7 +387,7 @@ export default function RegulationsPage() {
                     </span>
                   </div>
                   <div className="mt-4 space-y-2 text-xs">
-                    {replayResult.earlier_assessment.conditions.map((c: any) => (
+                    {replayResult.earlier_assessment.conditions.map((c) => (
                       <div key={c.condition_id} className="rounded-lg border border-slate-200 bg-white p-2.5">
                         <div className="flex items-center justify-between">
                           <span className="font-semibold text-slate-800">{c.title}</span>
@@ -422,7 +422,7 @@ export default function RegulationsPage() {
                     </span>
                   </div>
                   <div className="mt-4 space-y-2 text-xs">
-                    {replayResult.replay_assessment.conditions.map((c: any) => (
+                    {replayResult.replay_assessment.conditions.map((c) => (
                       <div key={c.condition_id} className="rounded-lg border border-blue-200 bg-white p-2.5">
                         <div className="flex items-center justify-between">
                           <span className="font-semibold text-slate-800">{c.title}</span>
@@ -447,7 +447,7 @@ export default function RegulationsPage() {
                     <span>Newly Identified Compliance Issues Under Target Version:</span>
                   </div>
                   <ul className="mt-2 list-inside list-disc space-y-1">
-                    {replayResult.newly_identified_issues.map((i: any, idx: number) => (
+                    {replayResult.newly_identified_issues.map((i, idx) => (
                       <li key={idx}>
                         <span className="font-semibold">{i.title}:</span> {i.reason}
                       </li>
@@ -548,7 +548,7 @@ export default function RegulationsPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {impactData.potentially_affected.map((c: any) => (
+                        {impactData.potentially_affected.map((c) => (
                           <tr key={c.deposit_id} className="hover:bg-red-50/20">
                             <td className="px-4 py-3 font-mono font-medium text-blue-700">
                               <Link href={`/deposits/${c.deposit_id}`}>{c.reference_no}</Link>

@@ -66,14 +66,14 @@ function DepositsList() {
               <button
                 key={fmt}
                 onClick={() => exportReport(fmt)}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-50"
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-xs hover:bg-slate-50"
               >
                 Export {fmt === "xlsx" ? "Excel" : fmt.toUpperCase()}
               </button>
             ))}
           {canCreate && (
-            <Link href="/deposits/new" className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700">
-              New FDR
+            <Link href="/deposits/new" className="rounded-lg bg-[#0c2340] px-4 py-1.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#123a6b]">
+              + New FDR
             </Link>
           )}
         </div>
@@ -84,8 +84,10 @@ function DepositsList() {
           <button
             key={g.key}
             onClick={() => router.push(`/deposits?group=${g.key}`)}
-            className={`rounded-full px-3 py-1.5 text-sm ${
-              group === g.key ? "bg-blue-600 text-white" : "bg-white text-slate-700 ring-1 ring-slate-300 hover:bg-slate-50"
+            className={`rounded-full px-3.5 py-1 text-xs font-semibold transition ${
+              group === g.key
+                ? "bg-[#0c2340] text-white shadow-xs"
+                : "bg-white text-slate-700 border border-slate-300 hover:bg-slate-50"
             }`}
           >
             {g.label}
@@ -95,7 +97,7 @@ function DepositsList() {
 
       {error && <Notice kind="error">{error}</Notice>}
 
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-xs">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-left text-slate-600">
             <tr>

@@ -3,8 +3,8 @@ import "./globals.css";
 
 // System fonts are used so the build does not depend on Google Fonts being reachable.
 export const metadata: Metadata = {
-  title: "AICTE Security Deposit / FDR Management Portal - Govt. of India",
-  description: "AICTE Security Deposit and Fixed Deposit Receipt (FDR) lifecycle management, verification, and statutory release.",
+  title: "FDR Nyasa – Intelligent Institutional Deposit Management System",
+  description: "FDR Nyasa: intelligent institutional deposit management for Fixed Deposit Receipt lifecycle, verification, and statutory release.",
   icons: {
     icon: "/assets/aicte_official_logo.png",
   },

@@ -113,7 +113,7 @@ export default function DashboardPage() {
               National Technical Education Portal
             </span>
             <h2 className="mt-2 text-2xl font-bold tracking-tight text-white sm:text-3xl leading-snug">
-              Welcome to AICTE FDR Management Portal
+              Welcome to FDR Nyasa
             </h2>
             <p className="mt-2 text-xs sm:text-sm text-blue-100/90 leading-relaxed">
               Ensure compliance. Enable transparency. Simplify processes. Monitor deposits, track scrutiny, and verify statutory liens.

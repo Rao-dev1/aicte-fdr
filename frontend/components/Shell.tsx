@@ -193,7 +193,7 @@ export function Shell({ children }: { children: ReactNode }) {
                 All India Council for Technical Education
               </p>
               <p className="text-[11px] font-medium text-slate-500 leading-tight">
-                अखिल भारतीय तकनीकी शिक्षा परिषद · FDR Management Portal
+                अखिल भारतीय तकनीकी शिक्षा परिषद · FDR Nyasa
               </p>
             </div>
           </Link>
@@ -306,7 +306,7 @@ export function Shell({ children }: { children: ReactNode }) {
         <div className="mx-auto max-w-7xl px-4 sm:px-6">
           <p>© 2026 All India Council for Technical Education (AICTE), Ministry of Education, Govt. of India.</p>
           <p className="mt-0.5 text-[11px] text-slate-400">
-            Nelson Mandela Marg, Vasant Kunj, New Delhi - 110070 · FDR & Security Deposit Management System
+            Nelson Mandela Marg, Vasant Kunj, New Delhi - 110070 · FDR Nyasa – Intelligent Institutional Deposit Management System
           </p>
         </div>
       </footer>

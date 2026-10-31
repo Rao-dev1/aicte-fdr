@@ -201,7 +201,7 @@ export default function Home() {
                 About
               </a>
               <Link href="/deposits" className="hover:text-[#0c2340] transition">
-                FDR Portal
+                FDR Nyasa
               </Link>
               <Link href="/regulations" className="hover:text-[#0c2340] transition">
                 Guidelines
